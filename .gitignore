@@ -1,0 +1,39 @@
+# Secrets and local runtime data
+.env
+.env.*
+!.env.example
+data/
+
+# Garmin session tokens (also under data/)
+**/garmin_tokens/
+**/garmin_tokens.json
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+.venv*/
+venv/
+ENV/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs
+*.log

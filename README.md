@@ -1,4 +1,4 @@
-# Garmin Connect sync
+# garmin-sync
 
 On-demand Garmin Connect → PostgreSQL sync with `GET /health` and `POST /sync`. No API auth (personal LAN / Unraid). Trigger syncs from n8n or any HTTP client.
 

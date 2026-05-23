@@ -1,7 +1,10 @@
+import copy
+import json
 import logging
 import os
 import time
 from datetime import date, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 from garminconnect import Garmin
@@ -14,6 +17,10 @@ logger = logging.getLogger(__name__)
 DATE_FMT = "%Y-%m-%d"
 ACTIVITY_PAGE = 100
 DAY_PAUSE_SEC = 0.2
+EXERCISES_FILE = Path(__file__).resolve().parent / "exercises.json"
+GARMIN_TIMESTAMP_FMT = "%Y-%m-%dT%H:%M:%S.0"
+
+_exercises_cache: list[dict[str, Any]] | None = None
 
 
 def date_range(since: date, until: date | None = None) -> list[date]:
@@ -279,3 +286,128 @@ def fetch_body_composition(
     except Exception as e:
         logger.exception("fetch body composition: %s", e)
         return []
+
+
+def _flatten_exercise_catalog(raw: dict[str, Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    categories = raw.get("categories")
+    if not isinstance(categories, dict):
+        return rows
+    for category, cat_data in categories.items():
+        if not isinstance(cat_data, dict):
+            continue
+        exercises = cat_data.get("exercises")
+        if not isinstance(exercises, dict):
+            continue
+        for exercise_name, details in exercises.items():
+            row: dict[str, Any] = {
+                "category": category,
+                "exerciseName": exercise_name,
+            }
+            if isinstance(details, dict):
+                if details.get("primaryMuscles"):
+                    row["primaryMuscles"] = details["primaryMuscles"]
+                if details.get("secondaryMuscles"):
+                    row["secondaryMuscles"] = details["secondaryMuscles"]
+            rows.append(row)
+    rows.sort(key=lambda r: (r["category"], r["exerciseName"]))
+    return rows
+
+
+def load_exercise_catalog() -> list[dict[str, Any]]:
+    """Load strength exercise catalog from bundled exercises.json."""
+    global _exercises_cache
+    if _exercises_cache is not None:
+        return _exercises_cache
+
+    if not EXERCISES_FILE.is_file():
+        raise FileNotFoundError(f"exercise catalog not found: {EXERCISES_FILE}")
+
+    logger.info("load_exercise_catalog: reading %s", EXERCISES_FILE)
+    with EXERCISES_FILE.open(encoding="utf-8") as f:
+        raw = json.load(f)
+    if not isinstance(raw, dict):
+        raise ValueError("unexpected exercise catalog format")
+    rows = _flatten_exercise_catalog(raw)
+    logger.info("load_exercise_catalog: %d exercises", len(rows))
+    _exercises_cache = rows
+    return rows
+
+
+def filter_exercise_catalog(
+    rows: list[dict[str, Any]],
+    *,
+    q: str | None = None,
+    category: str | None = None,
+    limit: int = 0,
+) -> list[dict[str, Any]]:
+    filtered = rows
+    if category is not None:
+        cat = category.strip().upper()
+        filtered = [r for r in filtered if r["category"] == cat]
+    if q is not None:
+        needle = q.strip().lower()
+        if needle:
+            filtered = [
+                r
+                for r in filtered
+                if needle in r["category"].lower()
+                or needle in r["exerciseName"].lower()
+            ]
+    if limit > 0:
+        filtered = filtered[:limit]
+    return filtered
+
+
+def _clean_workout_step_ids(node: Any) -> None:
+    if isinstance(node, list):
+        for item in node:
+            _clean_workout_step_ids(item)
+    elif isinstance(node, dict):
+        node.pop("stepId", None)
+        for value in node.values():
+            if isinstance(value, list | dict):
+                _clean_workout_step_ids(value)
+
+
+def prepare_workout_for_upload(workout: dict[str, Any]) -> dict[str, Any]:
+    """Return a copy of workout JSON suitable for Garmin upload."""
+    payload = copy.deepcopy(workout)
+    for field in ("workoutId", "ownerId", "updatedDate", "createdDate"):
+        payload.pop(field, None)
+    timestamp = datetime.now().strftime(GARMIN_TIMESTAMP_FMT)
+    payload["createdDate"] = timestamp
+    payload["updatedDate"] = timestamp
+    if "workoutSegments" in payload:
+        _clean_workout_step_ids(payload["workoutSegments"])
+    return payload
+
+
+def validate_workout_payload(workout: dict[str, Any]) -> None:
+    if not workout.get("workoutName"):
+        raise ValueError("workoutName is required")
+    if not workout.get("workoutSegments"):
+        raise ValueError("workoutSegments is required")
+    if not isinstance(workout["workoutSegments"], list):
+        raise ValueError("workoutSegments must be a list")
+
+
+def create_workout(
+    client: Garmin,
+    workout: dict[str, Any],
+    schedule_date: date | None = None,
+) -> dict[str, Any]:
+    validate_workout_payload(workout)
+    payload = prepare_workout_for_upload(workout)
+    result = client.upload_workout(payload)
+    if not isinstance(result, dict):
+        raise ValueError("unexpected upload_workout response")
+    workout_id = result.get("workoutId")
+    out: dict[str, Any] = {"workout": result, "workoutId": workout_id}
+    if schedule_date is not None:
+        if workout_id is None:
+            raise ValueError("upload succeeded but workoutId missing; cannot schedule")
+        scheduled = client.schedule_workout(workout_id, schedule_date.isoformat())
+        out["scheduled"] = scheduled
+        out["scheduleDate"] = schedule_date.isoformat()
+    return out

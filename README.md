@@ -144,6 +144,8 @@ docker compose up -d
 
 Do **not** use `--profile local` on Unraid — use your external Postgres only.
 
+Use `docker-compose-unraid.yml` (host port **8081** — **8080** is often Immich on the same box).
+
 1. Clone or copy this repo to the Unraid host.
 2. Set `DATABASE_URL` to your external Postgres instance in `.env` or Compose Manager env.
 3. Set `GARMIN_DATA_DIR=/mnt/user/appdata/garmin-sync` (or mount `/data` in the UI to that path).
@@ -235,10 +237,11 @@ Create a read-only Postgres user for Grafana scoped to the `garmin` schema.
 ## Manual sync
 
 ```bash
-curl -X POST http://host:8080/sync
-curl -X POST "http://host:8080/sync?start_date=2026-05-01&end_date=2026-05-23"
-curl -X POST "http://host:8080/sync?user_id=user2&start_date=2026-05-23"
-curl http://host:8080/health
+curl -X POST http://host:8081/sync
+curl -X POST "http://host:8081/sync?start_date=2026-05-01&end_date=2026-05-23"
+curl -X POST "http://host:8081/sync?user_id=user2&start_date=2026-05-23"
+curl http://host:8081/health
+curl "http://host:8081/exercises?q=squat&limit=10"
 ```
 
 Returns `{"status":"started","start_date":"...","end_date":"...","sync_log_id":...}` for one user, or `{"status":"started","sync_log_ids":{"user1":1,"user2":2}}` when syncing all. Optional query params:

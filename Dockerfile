@@ -6,6 +6,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY migrations/ migrations/
+COPY exercises.json .
 COPY *.py .
 
 ENV GARMIN_TOKEN_CACHE_PATH=/data/garmin_tokens

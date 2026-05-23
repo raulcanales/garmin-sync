@@ -2,8 +2,9 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timezone
+from typing import Any
 
-from fastapi import FastAPI, Query
+from fastapi import Body, FastAPI, Query
 from fastapi.responses import JSONResponse
 
 import db
@@ -265,3 +266,94 @@ async def trigger_sync(
     else:
         payload["sync_log_ids"] = log_ids
     return payload
+
+
+@app.get("/exercises")
+async def list_exercises(
+    q: str | None = Query(
+        default=None,
+        description="Filter by substring in category or exerciseName (case-insensitive).",
+    ),
+    category: str | None = Query(
+        default=None,
+        description="Exact category key, e.g. SQUAT or BENCH_PRESS.",
+    ),
+    limit: int = Query(
+        default=0,
+        ge=0,
+        le=10000,
+        description="Max rows to return (0 = no limit).",
+    ),
+):
+    """Garmin strength exercise catalog for building workout JSON.
+
+    Each row has category and exerciseName — use both on strength workout steps.
+    """
+    try:
+        rows = await asyncio.to_thread(garmin_client.load_exercise_catalog)
+        filtered = garmin_client.filter_exercise_catalog(
+            rows, q=q, category=category, limit=limit
+        )
+        return {
+            "source": str(garmin_client.EXERCISES_FILE.name),
+            "count": len(filtered),
+            "total": len(rows),
+            "exercises": filtered,
+        }
+    except Exception as e:
+        logger.exception("list exercises failed")
+        return JSONResponse(
+            status_code=502,
+            content={"status": "error", "error": str(e)},
+        )
+
+
+@app.post("/workouts")
+async def create_workout(
+    user_id: str = Query(
+        ...,
+        description="Garmin account id (user1, user2, …).",
+    ),
+    schedule_date: date | None = Query(
+        default=None,
+        description="Optional calendar date (YYYY-MM-DD) to schedule the workout.",
+    ),
+    workout: dict[str, Any] = Body(
+        ...,
+        description="Garmin workout-service JSON (workoutName, sportType, workoutSegments, …).",
+    ),
+):
+    """Upload a structured workout to Garmin Connect.
+
+    Pass the workout body Garmin expects (see GET /exercises for valid exercise names).
+    Optionally schedule it on a calendar date for the given user.
+    """
+    user = _find_user(user_id)
+    if user is None:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "status": "unknown_user",
+                "user_id": user_id,
+                "configured_users": app.state.users,
+            },
+        )
+    try:
+        garmin_client.validate_workout_payload(workout)
+    except ValueError as e:
+        return JSONResponse(
+            status_code=400,
+            content={"status": "invalid_workout", "error": str(e)},
+        )
+    try:
+        client = await asyncio.to_thread(garmin_client.garmin_login, user)
+        result = await asyncio.to_thread(
+            garmin_client.create_workout, client, workout, schedule_date
+        )
+        return {"status": "created", "user_id": user_id, **result}
+    except Exception as e:
+        logger.exception("create workout failed for %s", user_id)
+        return JSONResponse(
+            status_code=502,
+            content={"status": "error", "error": str(e)},
+        )

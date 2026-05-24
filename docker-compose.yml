@@ -22,18 +22,7 @@ services:
     restart: unless-stopped
     ports:
       - "8080:8080"
-    volumes:
-      - ${GARMIN_DATA_DIR:-./data}:/data
     environment:
-      GARMIN_EMAIL: ${GARMIN_EMAIL:-}
-      GARMIN_PASSWORD: ${GARMIN_PASSWORD:-}
-      GARMIN_USER_1_EMAIL: ${GARMIN_USER_1_EMAIL:-}
-      GARMIN_USER_1_PASSWORD: ${GARMIN_USER_1_PASSWORD:-}
-      GARMIN_USER_2_EMAIL: ${GARMIN_USER_2_EMAIL:-}
-      GARMIN_USER_2_PASSWORD: ${GARMIN_USER_2_PASSWORD:-}
-      GARMIN_USER_1_ID: ${GARMIN_USER_1_ID:-user1}
-      GARMIN_USER_2_ID: ${GARMIN_USER_2_ID:-user2}
-      GARMIN_TOKEN_CACHE_PATH: /data/garmin_tokens
       DATABASE_URL: ${DATABASE_URL:-postgresql://garmin:garmin@postgres:5432/garmin}
     depends_on:
       postgres:

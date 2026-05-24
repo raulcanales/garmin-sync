@@ -1,9 +1,12 @@
 import copy
 import json
 import logging
-import os
+import shutil
+import tempfile
 import time
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +26,19 @@ GARMIN_TIMESTAMP_FMT = "%Y-%m-%dT%H:%M:%S.0"
 _exercises_cache: list[dict[str, Any]] | None = None
 
 
+class LoginStatus(str, Enum):
+    SUCCESS = "success"
+    MFA_REQUIRED = "mfa_required"
+    FAILED = "failed"
+
+
+@dataclass(frozen=True)
+class LoginResult:
+    status: LoginStatus
+    tokens: str | None = None
+    error: str | None = None
+
+
 def date_range(since: date, until: date | None = None) -> list[date]:
     end = until or datetime.now().date()
     days: list[date] = []
@@ -33,26 +49,103 @@ def date_range(since: date, until: date | None = None) -> list[date]:
     return days
 
 
-def _prompt_mfa() -> str:
-    return input("Enter MFA code: ").strip()
+def extract_tokens(client: Garmin) -> str:
+    return client.client.dumps()
+
+
+def _validate_tokens(raw: str) -> None:
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as e:
+        raise GarminConnectAuthenticationError("Invalid token JSON") from e
+    if not isinstance(data, dict) or not data.get("di_token"):
+        raise GarminConnectAuthenticationError("Token payload missing di_token")
+
+
+def collect_tokens(client: Garmin, token_dir: str) -> str:
+    """Read tokens written by garminconnect, falling back to in-memory dumps()."""
+    token_path = Path(token_dir) / "garmin_tokens.json"
+    if token_path.is_file():
+        raw = token_path.read_text(encoding="utf-8").strip()
+        if raw:
+            _validate_tokens(raw)
+            return raw
+    raw = extract_tokens(client)
+    _validate_tokens(raw)
+    return raw
+
+
+def _translate_auth_error(e: Exception) -> Exception:
+    msg = str(e).lower()
+    if "429" in str(e) or "rate limit" in msg:
+        return GarminConnectAuthenticationError(
+            "Garmin rate-limited this IP (429). Wait 30–60 minutes before "
+            "retrying; avoid repeated login attempts."
+        )
+    return e
 
 
 def garmin_login(user: UserConfig) -> Garmin:
-    os.makedirs(user.token_path, exist_ok=True)
-    client = Garmin(user.email, user.password, is_cn=False, prompt_mfa=_prompt_mfa)
+    """Restore a Garmin session from tokens stored in the database."""
+    if not user.tokens:
+        raise GarminConnectAuthenticationError(
+            f"No saved tokens for {user.user_id}. Log in at /login first."
+        )
+    _validate_tokens(user.tokens)
+    token_dir = tempfile.mkdtemp(prefix="garmin-sync-")
+    token_path = Path(token_dir) / "garmin_tokens.json"
     try:
-        mfa_status, _ = client.login(tokenstore=user.token_path)
+        token_path.write_text(user.tokens, encoding="utf-8")
+        client = Garmin(is_cn=False)
+        mfa_status, _ = client.login(tokenstore=token_dir)
     except GarminConnectAuthenticationError as e:
-        msg = str(e).lower()
-        if "429" in str(e) or "rate limit" in msg:
-            raise GarminConnectAuthenticationError(
-                "Garmin rate-limited this IP (429). Wait 30–60 minutes before "
-                "retrying; avoid repeated login attempts."
-            ) from e
+        shutil.rmtree(token_dir, ignore_errors=True)
+        raise _translate_auth_error(e) from e
+    except Exception:
+        shutil.rmtree(token_dir, ignore_errors=True)
         raise
+    shutil.rmtree(token_dir, ignore_errors=True)
     if mfa_status:
-        client.resume_login(mfa_status, _prompt_mfa())
+        raise GarminConnectAuthenticationError(
+            f"Garmin MFA required for {user.user_id}. Log in again at /login."
+        )
     return client
+
+
+def start_garmin_login(email: str, password: str) -> tuple[Garmin, str, LoginResult]:
+    """Start credential login. Returns (client, token_dir, result).
+
+    When MFA is required the client must be kept alive and completed via
+    ``finish_garmin_login``.
+    """
+    token_dir = tempfile.mkdtemp(prefix="garmin-sync-")
+    client = Garmin(email, password, is_cn=False, return_on_mfa=True)
+    try:
+        pending, _ = client.login(tokenstore=token_dir)
+        if pending:
+            return client, token_dir, LoginResult(status=LoginStatus.MFA_REQUIRED)
+        tokens = collect_tokens(client, token_dir)
+        shutil.rmtree(token_dir, ignore_errors=True)
+        return client, token_dir, LoginResult(status=LoginStatus.SUCCESS, tokens=tokens)
+    except GarminConnectAuthenticationError as e:
+        shutil.rmtree(token_dir, ignore_errors=True)
+        translated = _translate_auth_error(e)
+        return client, token_dir, LoginResult(status=LoginStatus.FAILED, error=str(translated))
+    except Exception as e:
+        shutil.rmtree(token_dir, ignore_errors=True)
+        return client, token_dir, LoginResult(status=LoginStatus.FAILED, error=str(e))
+
+
+def finish_garmin_login(client: Garmin, token_dir: str, mfa_code: str) -> LoginResult:
+    """Complete an in-progress MFA login started with ``start_garmin_login``."""
+    try:
+        client.resume_login(None, mfa_code.strip())
+        tokens = collect_tokens(client, token_dir)
+        return LoginResult(status=LoginStatus.SUCCESS, tokens=tokens)
+    except Exception as e:
+        return LoginResult(status=LoginStatus.FAILED, error=str(e))
+    finally:
+        shutil.rmtree(token_dir, ignore_errors=True)
 
 
 def _activity_date(activity: dict[str, Any]) -> date | None:

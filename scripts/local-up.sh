@@ -5,9 +5,11 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-if [[ ! -f .env ]]; then
-  echo "Missing .env — copy .env.example to .env and set Garmin credentials."
-  exit 1
+if [[ -f .env ]]; then
+  set -a
+  # shellcheck disable=SC1091
+  source .env
+  set +a
 fi
 
 COMPOSE=(docker compose --profile local)
@@ -39,6 +41,7 @@ echo "Starting garmin-sync..."
 echo
 echo "Local stack is up."
 echo "  Health:  curl http://localhost:8080/health"
+echo "  Login:   open http://localhost:8080/login"
 echo "  Sync:    curl -X POST http://localhost:8080/sync"
 echo "  Postgres: localhost:5433 (garmin/garmin, db=garmin)"
 echo "  Logs:    docker compose --profile local logs -f garmin-sync"

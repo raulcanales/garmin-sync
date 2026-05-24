@@ -7,10 +7,12 @@ from typing import Any
 from fastapi import Body, FastAPI, Query
 from fastapi.responses import JSONResponse
 
+import auth
 import db
 import garmin_client
 import migrations
-from users import UserConfig, load_users
+from auth import LoginUserBody, MfaCompleteBody, RegisterUserBody
+from users import UserConfig
 
 logging.basicConfig(
     level=logging.INFO,
@@ -38,11 +40,8 @@ FETCHERS: list[tuple[str, str]] = [
 ]
 
 
-def _find_user(user_id: str) -> UserConfig | None:
-    for user in load_users():
-        if user.user_id == user_id:
-            return user
-    return None
+async def _find_user(user_id: str) -> UserConfig | None:
+    return await db.get_user(user_id)
 
 
 def _resolve_sync_range(
@@ -76,6 +75,11 @@ async def _sync_user(
             start_date,
             end_date,
         )
+        if not user.tokens:
+            msg = f"{user.user_id} is not logged in — open /login first"
+            logger.error("sync %s user=%s skipped: no tokens", log_id, user.user_id)
+            await db.finish_sync_log(log_id, "failed", items, msg)
+            return log_id
         try:
             logger.info(
                 "sync %s user=%s connecting to Garmin", log_id, user.user_id
@@ -89,6 +93,7 @@ async def _sync_user(
             )
         except Exception as e:
             logger.exception("garmin login failed for %s", user.user_id)
+            await db.clear_user_tokens(user.user_id)
             await db.finish_sync_log(log_id, "failed", items, str(e))
             return log_id
         ok_types = 0
@@ -139,6 +144,11 @@ async def _sync_user(
             f" errors={err_text}" if err_text else "",
         )
         await db.finish_sync_log(log_id, status, items, err_text)
+        try:
+            tokens = garmin_client.extract_tokens(client)
+            await db.save_user_tokens(user.user_id, tokens)
+        except Exception:
+            logger.exception("failed to persist refreshed tokens for %s", user.user_id)
     except Exception as e:
         logger.exception("sync %s user=%s aborted", log_id, user.user_id)
         if owned_log or log_id is not None:
@@ -154,9 +164,9 @@ async def run_sync(
 ) -> dict[str, int]:
     global _sync_running
     start, end = _resolve_sync_range(start_date, end_date)
-    users = load_users()
+    users = await db.list_users()
     if user_id is not None:
-        user = _find_user(user_id)
+        user = await _find_user(user_id)
         if user is None:
             raise ValueError(f"unknown user_id: {user_id}")
         users = [user]
@@ -196,8 +206,8 @@ async def run_sync(
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app.state.started_at = datetime.now(timezone.utc)
-    app.state.users = [u.user_id for u in load_users()]
     await migrations.run_migrations()
+    app.state.users = [u["user_id"] for u in await auth.list_users_public()]
     yield
     await db.close_pool()
 
@@ -209,18 +219,50 @@ app = FastAPI(lifespan=lifespan)
 async def health():
     started: datetime = app.state.started_at
     uptime = (datetime.now(timezone.utc) - started).total_seconds()
+    users = await auth.list_users_public()
+    app.state.users = [u["user_id"] for u in users]
     return {
         "status": "ok",
         "uptime_seconds": round(uptime, 1),
-        "users": app.state.users,
+        "users": users,
     }
+
+
+@app.get("/login")
+async def login_page():
+    return auth.login_page()
+
+
+@app.get("/users")
+async def list_users():
+    return {"users": await auth.list_users_public()}
+
+
+@app.post("/users")
+async def register_user(body: RegisterUserBody):
+    return await auth.register_and_login(body)
+
+
+@app.post("/users/{user_id}/login")
+async def login_user(user_id: str, body: LoginUserBody):
+    return await auth.login_existing_user(user_id, body)
+
+
+@app.post("/users/login/mfa")
+async def complete_mfa(body: MfaCompleteBody):
+    return await auth.complete_mfa(body.login_id, body.mfa_code)
+
+
+@app.delete("/users/{user_id}")
+async def remove_user(user_id: str):
+    return await auth.delete_user(user_id)
 
 
 @app.post("/sync")
 async def trigger_sync(
     user_id: str | None = Query(
         default=None,
-        description="Sync one user (user1, user2). Omit to sync all configured users.",
+        description="Sync one user by slug. Omit to sync all registered users.",
     ),
     start_date: date | None = Query(
         default=None,
@@ -240,7 +282,7 @@ async def trigger_sync(
             status_code=409,
             content={"status": "already_running"},
         )
-    if user_id is not None and _find_user(user_id) is None:
+    if user_id is not None and await _find_user(user_id) is None:
         return JSONResponse(
             status_code=400,
             content={
@@ -249,9 +291,11 @@ async def trigger_sync(
                 "configured_users": app.state.users,
             },
         )
-    users = load_users() if user_id is None else [_find_user(user_id)]
+    users = await db.list_users() if user_id is None else [await _find_user(user_id)]
     log_ids = {
-        user.user_id: await db.start_sync_log(user.user_id) for user in users if user
+        user.user_id: await db.start_sync_log(user.user_id)
+        for user in users
+        if user
     }
     asyncio.create_task(run_sync(user_id, start_date, end_date, log_ids))
     payload: dict[str, object] = {
@@ -312,7 +356,7 @@ async def list_exercises(
 async def create_workout(
     user_id: str = Query(
         ...,
-        description="Garmin account id (user1, user2, …).",
+        description="Registered user slug (see GET /users).",
     ),
     schedule_date: date | None = Query(
         default=None,
@@ -328,7 +372,7 @@ async def create_workout(
     Pass the workout body Garmin expects (see GET /exercises for valid exercise names).
     Optionally schedule it on a calendar date for the given user.
     """
-    user = _find_user(user_id)
+    user = await _find_user(user_id)
     if user is None:
         return JSONResponse(
             status_code=400,
@@ -336,6 +380,15 @@ async def create_workout(
                 "status": "unknown_user",
                 "user_id": user_id,
                 "configured_users": app.state.users,
+            },
+        )
+    if not user.tokens:
+        return JSONResponse(
+            status_code=401,
+            content={
+                "status": "not_logged_in",
+                "user_id": user_id,
+                "message": "Open /login to connect this Garmin account first.",
             },
         )
     try:
@@ -350,6 +403,8 @@ async def create_workout(
         result = await asyncio.to_thread(
             garmin_client.create_workout, client, workout, schedule_date
         )
+        tokens = garmin_client.extract_tokens(client)
+        await db.save_user_tokens(user.user_id, tokens)
         return {"status": "created", "user_id": user_id, **result}
     except Exception as e:
         logger.exception("create workout failed for %s", user_id)

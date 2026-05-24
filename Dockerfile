@@ -9,8 +9,6 @@ COPY migrations/ migrations/
 COPY exercises.json .
 COPY *.py .
 
-ENV GARMIN_TOKEN_CACHE_PATH=/data/garmin_tokens
-
 EXPOSE 8080
 
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]

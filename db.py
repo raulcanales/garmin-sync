@@ -165,3 +165,135 @@ async def finish_sync_log(
     )
 
 
+def _tokens_to_str(tokens: Any) -> str | None:
+    if tokens is None:
+        return None
+    if isinstance(tokens, str):
+        return tokens
+    return json.dumps(tokens, separators=(",", ":"))
+
+
+def _row_to_user(row: asyncpg.Record) -> "UserConfig":
+    from users import UserConfig
+
+    return UserConfig(
+        user_id=row["user_id"],
+        nickname=row["nickname"],
+        email=row["email"],
+        tokens=_tokens_to_str(row["tokens"]),
+    )
+
+
+async def list_users() -> list["UserConfig"]:
+    from users import UserConfig
+
+    pool = await get_pool()
+    rows = await pool.fetch(
+        f"""
+        SELECT user_id, nickname, email, tokens
+        FROM {SCHEMA}.users
+        ORDER BY nickname
+        """
+    )
+    return [_row_to_user(row) for row in rows]
+
+
+async def get_user(user_id: str) -> "UserConfig | None":
+    pool = await get_pool()
+    row = await pool.fetchrow(
+        f"""
+        SELECT user_id, nickname, email, tokens
+        FROM {SCHEMA}.users
+        WHERE user_id = $1
+        """,
+        user_id,
+    )
+    if row is None:
+        return None
+    return _row_to_user(row)
+
+
+async def create_user(user_id: str, nickname: str, email: str) -> "UserConfig":
+    pool = await get_pool()
+    now = datetime.now(timezone.utc)
+    row = await pool.fetchrow(
+        f"""
+        INSERT INTO {SCHEMA}.users (user_id, nickname, email, created_at, updated_at)
+        VALUES ($1, $2, $3, $4, $4)
+        RETURNING user_id, nickname, email, tokens
+        """,
+        user_id,
+        nickname,
+        email.strip().lower(),
+        now,
+    )
+    return _row_to_user(row)
+
+
+async def update_user_profile(
+    user_id: str, *, nickname: str | None = None, email: str | None = None
+) -> "UserConfig | None":
+    pool = await get_pool()
+    row = await pool.fetchrow(
+        f"""
+        UPDATE {SCHEMA}.users
+        SET
+          nickname = COALESCE($2, nickname),
+          email = COALESCE($3, email),
+          updated_at = $4
+        WHERE user_id = $1
+        RETURNING user_id, nickname, email, tokens
+        """,
+        user_id,
+        nickname,
+        email.strip().lower() if email else None,
+        datetime.now(timezone.utc),
+    )
+    if row is None:
+        return None
+    return _row_to_user(row)
+
+
+async def save_user_tokens(user_id: str, tokens: str) -> None:
+    payload = json.loads(tokens)
+    if not isinstance(payload, dict) or not payload.get("di_token"):
+        raise ValueError("Refusing to save invalid Garmin token payload")
+
+    pool = await get_pool()
+    now = datetime.now(timezone.utc)
+    result = await pool.execute(
+        f"""
+        UPDATE {SCHEMA}.users
+        SET tokens = $2::jsonb, updated_at = $3, last_login_at = $3
+        WHERE user_id = $1
+        """,
+        user_id,
+        json.dumps(payload, separators=(",", ":")),
+        now,
+    )
+    if result.split()[-1] != "1":
+        raise RuntimeError(f"Failed to save tokens for user_id={user_id}")
+
+
+async def clear_user_tokens(user_id: str) -> None:
+    pool = await get_pool()
+    await pool.execute(
+        f"""
+        UPDATE {SCHEMA}.users
+        SET tokens = NULL, updated_at = $2
+        WHERE user_id = $1
+        """,
+        user_id,
+        datetime.now(timezone.utc),
+    )
+
+
+async def delete_user(user_id: str) -> bool:
+    pool = await get_pool()
+    result = await pool.execute(
+        f"DELETE FROM {SCHEMA}.users WHERE user_id = $1",
+        user_id,
+    )
+    return result.endswith("1")
+
+

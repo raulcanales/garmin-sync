@@ -6,14 +6,7 @@ services:
     ports:
       # Host 8080 is often Immich; garmin-sync listens on 8081
       - "8081:8080"
-    volumes:
-      - /mnt/user/appdata/garmin-sync:/data
     environment:
-      GARMIN_USER_1_EMAIL: ${GARMIN_USER_1_EMAIL}
-      GARMIN_USER_1_PASSWORD: ${GARMIN_USER_1_PASSWORD}
-      GARMIN_USER_2_EMAIL: ${GARMIN_USER_2_EMAIL}
-      GARMIN_USER_2_PASSWORD: ${GARMIN_USER_2_PASSWORD}
-      GARMIN_TOKEN_CACHE_PATH: /data/garmin_tokens
       DATABASE_URL: ${DATABASE_URL}
     networks:
       - proxynet

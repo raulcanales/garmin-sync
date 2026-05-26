@@ -219,7 +219,7 @@ On Unraid, use `docker-compose-unraid.yml` (pulls the published image). Local de
 
 ## LLM / n8n tools
 
-HTTP endpoints under `/tools` expose Garmin data and coach state (goals, notes, planned workouts) for LLM agents. See **[LLM_TOOLS.md](LLM_TOOLS.md)** for tool names, paths, and n8n wiring.
+HTTP endpoints under `/tools` expose Garmin data and coach state (goals, notes, planned workouts) for LLM agents. The same tools are available via **MCP** at **`/mcp`** on the same port (e.g. `http://localhost:8080/mcp`). See **[LLM_TOOLS.md](LLM_TOOLS.md)** for REST paths, MCP URL, and n8n wiring.
 
 `GET /users` and `GET /health` include `user_id` for each registered account.
 

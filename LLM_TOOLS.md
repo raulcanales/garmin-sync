@@ -1,10 +1,30 @@
-# LLM tools (n8n / agent HTTP)
+# LLM tools (n8n / agent HTTP / MCP)
 
-REST endpoints under `/tools` for an LLM coach agent. All tools take **`user_id`** (integer from `GET /users` or `GET /health`). No API auth — restrict to your LAN/VPN like the rest of garmin-sync.
+REST endpoints under `/tools` for an LLM coach agent. The same tools are also exposed as an **MCP server** (`mcp_server.py`) for n8n’s MCP Client node and Cursor.
 
-Base URL examples: `http://localhost:8080` (local) or `http://<host>:8081` (Unraid).
+All tools take **`user_id`** (integer from `GET /users` or `GET /health`). No API auth — restrict to your LAN/VPN like the rest of garmin-sync.
+
+Base URL examples: `http://localhost:8080` (local REST) or `http://<host>:8081` (Unraid REST).
 
 OpenAPI schema: `GET /docs` (FastAPI).
+
+## MCP (recommended for n8n)
+
+MCP runs **inside the main app** on the same port as REST — no extra service or port.
+
+| | |
+|---|---|
+| **Transport** | HTTP Streamable |
+| **URL** | `http://localhost:8080/mcp` (local) or `http://<host>:8081/mcp` (Unraid) |
+| **Tools** | Same names as the REST table below (`get_recovery_snapshot`, …) |
+
+**n8n:** MCP Client Tool → **HTTP Streamable** → `http://garmin-sync:8080/mcp` (Compose service name) or `http://<host>:8081/mcp` on Unraid.
+
+**Quick check:** `curl http://<host>:<port>/health` should include `"mcp": "/mcp"`. Test MCP with the `initialize` curl example below (not a bare `POST` with no body).
+
+If you see `Invalid Host header`, rebuild with the latest image (older builds only allowed `localhost` as Host).
+
+**Cursor (stdio, separate process):** `python mcp_server.py` with `.cursor/mcp.json` pointing at that command and `DATABASE_URL`.
 
 **n8n pattern:** Telegram gives you `telegram_id`, not `user_id`. Call **`get_user_by_telegram`** once at the start of the workflow, then pass `user_id` to every other tool. You do not need `telegram_id` on the other endpoints.
 

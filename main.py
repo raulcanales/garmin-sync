@@ -11,6 +11,7 @@ import auth
 import db
 import garmin_client
 import llm_router
+import mcp_server
 import migrations
 from auth import BindTelegramBody, LoginUserBody, MfaCompleteBody, RegisterUserBody
 from users import UserConfig
@@ -225,12 +226,14 @@ async def lifespan(app: FastAPI):
     if stale:
         logger.warning("marked %d stale sync_log row(s) as failed", stale)
     app.state.users = [u["nickname"] for u in await auth.list_users_public()]
-    yield
+    async with mcp_instance.session_manager.run():
+        yield
     await db.close_pool()
 
 
 app = FastAPI(lifespan=lifespan)
 app.include_router(llm_router.router)
+mcp_instance = mcp_server.setup_mcp(app)
 
 
 @app.get("/health")
@@ -243,6 +246,7 @@ async def health():
         "status": "ok",
         "uptime_seconds": round(uptime, 1),
         "users": users,
+        "mcp": "/mcp",
     }
 
 

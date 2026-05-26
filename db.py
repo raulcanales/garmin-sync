@@ -132,6 +132,61 @@ async def upsert_batch(user_id: int, table: str, rows: list[dict[str, Any]]) -> 
     return count
 
 
+async def upsert_activity_details(
+    user_id: int, rows: list[dict[str, Any]]
+) -> int:
+    if not rows:
+        return 0
+    pool = await get_pool()
+    count = 0
+    async with pool.acquire() as conn:
+        for row in rows:
+            data = row["data"]
+            payload = data if isinstance(data, str) else json.dumps(data)
+            await conn.execute(
+                f"""
+                INSERT INTO {SCHEMA}.activity_details
+                  (user_id, date, source_id, activity_type, data)
+                VALUES ($1, $2, $3, $4, $5::jsonb)
+                ON CONFLICT (user_id, source_id)
+                DO UPDATE SET
+                  date = EXCLUDED.date,
+                  activity_type = EXCLUDED.activity_type,
+                  data = EXCLUDED.data,
+                  synced_at = now()
+                """,
+                user_id,
+                row["date"],
+                row["source_id"],
+                row.get("activity_type"),
+                payload,
+            )
+            count += 1
+    return count
+
+
+_SYNC_COVERAGE_TABLES = (*TABLES.keys(), "activity_details")
+
+
+async def get_user_sync_coverage(user_id: int) -> dict[str, str]:
+    """Latest synced_at per data table for a user (ISO timestamps)."""
+    pool = await get_pool()
+    coverage: dict[str, str] = {}
+    for table in _SYNC_COVERAGE_TABLES:
+        row = await pool.fetchrow(
+            f"""
+            SELECT max(synced_at) AS latest
+            FROM {SCHEMA}.{table}
+            WHERE user_id = $1
+            """,
+            user_id,
+        )
+        latest = row["latest"] if row else None
+        if latest is not None:
+            coverage[table] = latest.isoformat()
+    return coverage
+
+
 async def start_sync_log(user_id: int) -> int:
     pool = await get_pool()
     row = await pool.fetchrow(
@@ -149,10 +204,16 @@ async def start_sync_log(user_id: int) -> int:
 async def finish_sync_log(
     log_id: int,
     status: str,
-    items_fetched: dict[str, int] | None,
     error: str | None,
 ) -> None:
     pool = await get_pool()
+    row = await pool.fetchrow(
+        f"SELECT user_id FROM {SCHEMA}.sync_log WHERE id = $1",
+        log_id,
+    )
+    if row is None:
+        return
+    coverage = await get_user_sync_coverage(int(row["user_id"]))
     await pool.execute(
         f"""
         UPDATE {SCHEMA}.sync_log
@@ -162,9 +223,38 @@ async def finish_sync_log(
         log_id,
         datetime.now(timezone.utc),
         status,
-        json.dumps(items_fetched or {}),
+        json.dumps(coverage),
         error,
     )
+
+
+async def fail_stale_sync_logs(
+    reason: str = "interrupted: service restarted",
+) -> int:
+    """Mark orphaned running sync_log rows as failed (e.g. after a crash)."""
+    pool = await get_pool()
+    rows = await pool.fetch(
+        f"""
+        SELECT id, user_id
+        FROM {SCHEMA}.sync_log
+        WHERE status = 'running' AND finished_at IS NULL
+        """
+    )
+    now = datetime.now(timezone.utc)
+    for row in rows:
+        coverage = await get_user_sync_coverage(int(row["user_id"]))
+        await pool.execute(
+            f"""
+            UPDATE {SCHEMA}.sync_log
+            SET finished_at = $2, status = 'failed', items_fetched = $3::jsonb, error = $4
+            WHERE id = $1
+            """,
+            row["id"],
+            now,
+            json.dumps(coverage),
+            reason,
+        )
+    return len(rows)
 
 
 def _tokens_to_str(tokens: Any) -> str | None:

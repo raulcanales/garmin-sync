@@ -260,7 +260,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT\n  started_at,\n  finished_at,\n  status,\n  duration_seconds,\n  error,\n  items_fetched\nFROM garmin.v_sync_log\nWHERE nickname = ${user:singlequote} AND $__timeFilter(started_at)\nORDER BY started_at DESC\nLIMIT 50",
+          "rawSql": "SELECT\n  started_at,\n  finished_at,\n  status,\n  duration_seconds,\n  error,\n  items_fetched AS data_last_synced\nFROM garmin.v_sync_log\nWHERE nickname = ${user:singlequote} AND $__timeFilter(started_at)\nORDER BY started_at DESC\nLIMIT 50",
           "refId": "A"
         }
       ],

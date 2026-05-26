@@ -2,7 +2,9 @@
 
 On-demand Garmin Connect → PostgreSQL sync with `GET /health` and `POST /sync`. No API auth (personal LAN / Unraid). Register Garmin accounts via a web login page; tokens and user profiles live in Postgres.
 
-Synced tables (JSONB payloads): `activities`, `sleep`, `daily_summary`, `body_battery`, `hrv`, `heart_rate`, `stress`, `body_composition`, `floors`, `training_readiness`, `morning_training_readiness`, `training_status`, `max_metrics`.
+Synced tables (JSONB payloads): `activities`, `activity_details`, `sleep`, `daily_summary`, `body_battery`, `hrv`, `heart_rate`, `stress`, `body_composition`, `floors`, `training_readiness`, `morning_training_readiness`, `training_status`, `max_metrics`.
+
+After each activity sync, running and strength workouts are enriched via Garmin detail APIs (`split_summaries`, `hr_zones`, `exercise_sets`).
 
 ## Environment variables
 
@@ -215,15 +217,24 @@ REGISTRY=10.0.0.60:5001 IMAGE_NAME=garmin-sync TAG=latest ./scripts/publish.sh
 
 On Unraid, use `docker-compose-unraid.yml` (pulls the published image). Local dev uses `docker-compose.yml` with `--profile local`.
 
+## LLM / n8n tools
+
+HTTP endpoints under `/tools` expose Garmin data and coach state (goals, notes, planned workouts) for LLM agents. See **[LLM_TOOLS.md](LLM_TOOLS.md)** for tool names, paths, and n8n wiring.
+
+`GET /users` and `GET /health` include `user_id` for each registered account.
+
 ## Grafana views
 
-`001_initial_schema.sql` creates tables, the `garmin.users` registry, and read-only Grafana views.
+`001_initial_schema.sql` creates tables, the `garmin.users` registry, and read-only Grafana views. `002_activity_enrichment.sql` adds `activity_details` and type-specific activity views.
 
 | View | Use |
 |------|-----|
 | `garmin.v_users` | User dropdown (`nickname`, `name`, `logged_in`, …) |
 | `garmin.v_daily_metrics` | Recovery / wellness time series (HRV, sleep, stress, steps, etc.) |
-| `garmin.v_activities` | Workout history |
+| `garmin.v_activities` | Cross-type workout summary (duration, HR, training load, sets/reps when present) |
+| `garmin.v_running` | Running-specific metrics + splits / HR zones |
+| `garmin.v_strength` | Strength summary + compact `exercises_summary` |
+| `garmin.v_strength_sets` | One row per strength set (exercise, reps, weight) |
 | `garmin.v_body_composition` | Weight and body composition |
 | `garmin.v_sync_log` | Sync job history |
 
@@ -269,6 +280,8 @@ Returns `{"status":"started","start_date":"...","end_date":"...","telegram_id":1
 - `end_date` — last day to fetch (defaults to `start_date`)
 
 If a sync is already running: HTTP 409 and `{"status":"already_running"}`.
+
+On startup, any `sync_log` rows still marked `running` (e.g. after a crash) are closed as `failed` with error `interrupted: service restarted`. When a sync finishes, `items_fetched` stores each table’s latest `synced_at` for that user (not row counts from the Garmin fetch).
 
 ## Fresh database
 

@@ -20,6 +20,20 @@ logger = logging.getLogger(__name__)
 DATE_FMT = "%Y-%m-%d"
 ACTIVITY_PAGE = 100
 DAY_PAUSE_SEC = 0.2
+ACTIVITY_DETAIL_PAUSE_SEC = 0.35
+
+RUNNING_TYPES = frozenset(
+    {
+        "street_running",
+        "trail_running",
+        "treadmill_running",
+        "virtual_run",
+        "indoor_running",
+        "track_running",
+        "running",
+    }
+)
+STRENGTH_TYPES = frozenset({"strength_training"})
 EXERCISES_FILE = Path(__file__).resolve().parent / "exercises.json"
 GARMIN_TIMESTAMP_FMT = "%Y-%m-%dT%H:%M:%S.0"
 
@@ -237,6 +251,142 @@ def fetch_activities(
     except Exception as e:
         logger.exception("fetch activities: %s", e)
         return []
+
+
+def _exercise_sets_list(raw: Any) -> list[dict[str, Any]]:
+    if raw is None:
+        return []
+    if isinstance(raw, list):
+        return [x for x in raw if isinstance(x, dict)]
+    if isinstance(raw, dict):
+        for key in ("exerciseSets", "exercise_sets", "sets", "setList"):
+            chunk = raw.get(key)
+            if isinstance(chunk, list):
+                return [x for x in chunk if isinstance(x, dict)]
+        if raw.get("exercises") or raw.get("repetitionCount") is not None:
+            return [raw]
+    return []
+
+
+def _normalize_exercise_sets(raw: Any) -> list[dict[str, Any]]:
+    normalized: list[dict[str, Any]] = []
+    for i, item in enumerate(_exercise_sets_list(raw), start=1):
+        exercises = item.get("exercises")
+        name: str | None = None
+        category: str | None = None
+        if isinstance(exercises, list) and exercises:
+            ex0 = exercises[0]
+            if isinstance(ex0, dict):
+                name = ex0.get("name") or ex0.get("exerciseName")
+                category = ex0.get("category")
+        if name is None:
+            name = item.get("exerciseName") or item.get("name")
+        if category is None:
+            category = item.get("category")
+
+        reps = item.get("repetitionCount")
+        if reps is None:
+            reps = item.get("reps")
+
+        weight_g = item.get("weight")
+        weight_kg: float | None = None
+        if weight_g is not None:
+            try:
+                weight_kg = float(weight_g) / 1000.0
+            except (TypeError, ValueError):
+                weight_kg = None
+
+        duration = item.get("duration")
+        duration_s: float | None = None
+        if duration is not None:
+            try:
+                duration_s = float(duration)
+            except (TypeError, ValueError):
+                duration_s = None
+
+        normalized.append(
+            {
+                "set_order": i,
+                "exercise_name": str(name) if name else None,
+                "category": str(category) if category else None,
+                "reps": int(reps) if reps is not None else None,
+                "weight_kg": weight_kg,
+                "duration_s": duration_s,
+                "set_type": item.get("setType") or item.get("set_type"),
+            }
+        )
+    return normalized
+
+
+def _fetch_activity_detail_payload(
+    client: Garmin, activity_id: str, activity_type: str | None
+) -> dict[str, Any] | None:
+    if activity_type in STRENGTH_TYPES:
+        try:
+            raw_sets = client.get_activity_exercise_sets(activity_id)
+        except Exception as e:
+            logger.warning(
+                "exercise sets for activity %s: %s", activity_id, e
+            )
+            return None
+        exercise_sets = _normalize_exercise_sets(raw_sets)
+        if not exercise_sets:
+            return None
+        return {"exercise_sets": exercise_sets}
+
+    if activity_type in RUNNING_TYPES:
+        payload: dict[str, Any] = {}
+        try:
+            splits = client.get_activity_split_summaries(activity_id)
+            if splits:
+                payload["split_summaries"] = splits
+        except Exception as e:
+            logger.warning(
+                "split summaries for activity %s: %s", activity_id, e
+            )
+        try:
+            hr_zones = client.get_activity_hr_in_timezones(activity_id)
+            if hr_zones:
+                payload["hr_zones"] = hr_zones
+        except Exception as e:
+            logger.warning("HR zones for activity %s: %s", activity_id, e)
+        if payload:
+            return payload
+        return None
+
+    return None
+
+
+def fetch_activity_details(
+    client: Garmin, activities: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Fetch per-activity detail for strength and running workouts."""
+    rows: list[dict[str, Any]] = []
+    targets = [
+        a
+        for a in activities
+        if a.get("source_id")
+        and a.get("activity_type") in (STRENGTH_TYPES | RUNNING_TYPES)
+    ]
+    logger.info("fetch_activity_details: %d activities to enrich", len(targets))
+    for activity in targets:
+        activity_id = str(activity["source_id"])
+        activity_type = activity.get("activity_type")
+        payload = _fetch_activity_detail_payload(client, activity_id, activity_type)
+        if not payload:
+            time.sleep(ACTIVITY_DETAIL_PAUSE_SEC)
+            continue
+        rows.append(
+            {
+                "date": activity["date"],
+                "source_id": activity_id,
+                "activity_type": activity_type,
+                "data": payload,
+            }
+        )
+        time.sleep(ACTIVITY_DETAIL_PAUSE_SEC)
+    logger.info("fetch_activity_details: stored payloads for %d", len(rows))
+    return rows
 
 
 def _fetch_per_day(

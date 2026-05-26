@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 import auth
 import db
 import garmin_client
+import llm_router
 import migrations
 from auth import BindTelegramBody, LoginUserBody, MfaCompleteBody, RegisterUserBody
 from users import UserConfig
@@ -75,7 +76,6 @@ async def _sync_user(
     if log_id is None:
         log_id = await db.start_sync_log(user.user_id)
     errors: list[str] = []
-    items: dict[str, int] = {}
     status = "failed"
     try:
         logger.info(
@@ -88,7 +88,7 @@ async def _sync_user(
         if not user.tokens:
             msg = f"{user.nickname} is not logged in — open /login first"
             logger.error("sync %s user=%s skipped: no tokens", log_id, user.nickname)
-            await db.finish_sync_log(log_id, "failed", items, msg)
+            await db.finish_sync_log(log_id, "failed", msg)
             return log_id
         try:
             logger.info(
@@ -104,7 +104,7 @@ async def _sync_user(
         except Exception as e:
             logger.exception("garmin login failed for %s", user.nickname)
             await db.clear_user_tokens(user.user_id)
-            await db.finish_sync_log(log_id, "failed", items, str(e))
+            await db.finish_sync_log(log_id, "failed", str(e))
             return log_id
         ok_types = 0
         for i, (table, func_name) in enumerate(FETCHERS, start=1):
@@ -122,7 +122,11 @@ async def _sync_user(
                     fetcher, client, start_date, end_date
                 )
                 n = await db.upsert_batch(user.user_id, table, rows)
-                items[table] = n
+                if table == "activities" and rows:
+                    detail_rows = await asyncio.to_thread(
+                        garmin_client.fetch_activity_details, client, rows
+                    )
+                    await db.upsert_activity_details(user.user_id, detail_rows)
                 ok_types += 1
                 logger.info(
                     "sync %s user=%s %s: fetched %d, stored %d",
@@ -146,14 +150,13 @@ async def _sync_user(
             status = "success"
         err_text = "; ".join(errors) if errors else None
         logger.info(
-            "sync %s user=%s finished status=%s stored=%s%s",
+            "sync %s user=%s finished status=%s%s",
             log_id,
             user.nickname,
             status,
-            items,
             f" errors={err_text}" if err_text else "",
         )
-        await db.finish_sync_log(log_id, status, items, err_text)
+        await db.finish_sync_log(log_id, status, err_text)
         try:
             tokens = garmin_client.extract_tokens(client)
             await db.save_user_tokens(user.user_id, tokens)
@@ -162,7 +165,7 @@ async def _sync_user(
     except Exception as e:
         logger.exception("sync %s user=%s aborted", log_id, user.nickname)
         if owned_log or log_id is not None:
-            await db.finish_sync_log(log_id, "failed", items, str(e))
+            await db.finish_sync_log(log_id, "failed", str(e))
     return log_id
 
 
@@ -184,14 +187,14 @@ async def run_sync(
     if _sync_running:
         if log_ids:
             for _, lid in log_ids.items():
-                await db.finish_sync_log(lid, "failed", {}, "sync already running")
+                await db.finish_sync_log(lid, "failed", "sync already running")
         return log_ids or {}
     async with sync_lock:
         if _sync_running:
             if log_ids:
                 for _, lid in log_ids.items():
                     await db.finish_sync_log(
-                        lid, "failed", {}, "sync already running"
+                        lid, "failed", "sync already running"
                     )
             return log_ids or {}
         _sync_running = True
@@ -218,12 +221,16 @@ async def run_sync(
 async def lifespan(app: FastAPI):
     app.state.started_at = datetime.now(timezone.utc)
     await migrations.run_migrations()
+    stale = await db.fail_stale_sync_logs()
+    if stale:
+        logger.warning("marked %d stale sync_log row(s) as failed", stale)
     app.state.users = [u["nickname"] for u in await auth.list_users_public()]
     yield
     await db.close_pool()
 
 
 app = FastAPI(lifespan=lifespan)
+app.include_router(llm_router.router)
 
 
 @app.get("/health")

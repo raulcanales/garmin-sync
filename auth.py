@@ -69,6 +69,7 @@ def _cleanup_expired_mfa() -> None:
 
 def _user_public(user: UserConfig) -> dict[str, object]:
     return {
+        "user_id": user.user_id,
         "nickname": user.nickname,
         "name": user.name,
         "email": user.email,

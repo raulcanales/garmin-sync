@@ -89,7 +89,7 @@ def garmin_login(user: UserConfig) -> Garmin:
     """Restore a Garmin session from tokens stored in the database."""
     if not user.tokens:
         raise GarminConnectAuthenticationError(
-            f"No saved tokens for {user.user_id}. Log in at /login first."
+            f"No saved tokens for {user.nickname}. Log in at /login first."
         )
     _validate_tokens(user.tokens)
     token_dir = tempfile.mkdtemp(prefix="garmin-sync-")
@@ -107,7 +107,7 @@ def garmin_login(user: UserConfig) -> Garmin:
     shutil.rmtree(token_dir, ignore_errors=True)
     if mfa_status:
         raise GarminConnectAuthenticationError(
-            f"Garmin MFA required for {user.user_id}. Log in again at /login."
+            f"Garmin MFA required for {user.nickname}. Log in again at /login."
         )
     return client
 

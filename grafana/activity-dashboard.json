@@ -51,7 +51,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT time, steps AS value\nFROM garmin.v_daily_metrics\nWHERE user_id = ${user:singlequote} AND $__timeFilter(date)\nORDER BY time",
+          "rawSql": "SELECT time, steps AS value\nFROM garmin.v_daily_metrics\nWHERE nickname = ${user:singlequote} AND $__timeFilter(date)\nORDER BY time",
           "refId": "A"
         }
       ],
@@ -85,7 +85,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT time, steps AS value\nFROM garmin.v_daily_metrics\nWHERE user_id = ${user:singlequote} AND $__timeFilter(date)\nORDER BY time",
+          "rawSql": "SELECT time, steps AS value\nFROM garmin.v_daily_metrics\nWHERE nickname = ${user:singlequote} AND $__timeFilter(date)\nORDER BY time",
           "refId": "A"
         }
       ],
@@ -119,7 +119,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT time, 1 AS value\nFROM garmin.v_activities\nWHERE user_id = ${user:singlequote} AND $__timeFilter(time)\nORDER BY time",
+          "rawSql": "SELECT time, 1 AS value\nFROM garmin.v_activities\nWHERE nickname = ${user:singlequote} AND $__timeFilter(time)\nORDER BY time",
           "refId": "A"
         }
       ],
@@ -153,7 +153,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT time, distance_km AS value\nFROM garmin.v_activities\nWHERE user_id = ${user:singlequote} AND $__timeFilter(time)\nORDER BY time",
+          "rawSql": "SELECT time, distance_km AS value\nFROM garmin.v_activities\nWHERE nickname = ${user:singlequote} AND $__timeFilter(time)\nORDER BY time",
           "refId": "A"
         }
       ],
@@ -196,7 +196,7 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT time, steps AS \"Steps\"\nFROM garmin.v_daily_metrics\nWHERE user_id = ${user:singlequote} AND $__timeFilter(date)\nORDER BY time",
+          "rawSql": "SELECT time, steps AS \"Steps\"\nFROM garmin.v_daily_metrics\nWHERE nickname = ${user:singlequote} AND $__timeFilter(date)\nORDER BY time",
           "refId": "A"
         }
       ],
@@ -239,7 +239,7 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT time, moderate_minutes AS \"Moderate\"\nFROM garmin.v_daily_metrics\nWHERE user_id = ${user:singlequote} AND $__timeFilter(date)\nORDER BY time",
+          "rawSql": "SELECT time, moderate_minutes AS \"Moderate\"\nFROM garmin.v_daily_metrics\nWHERE nickname = ${user:singlequote} AND $__timeFilter(date)\nORDER BY time",
           "refId": "A"
         },
         {
@@ -247,7 +247,7 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT time, vigorous_minutes AS \"Vigorous\"\nFROM garmin.v_daily_metrics\nWHERE user_id = ${user:singlequote} AND $__timeFilter(date)\nORDER BY time",
+          "rawSql": "SELECT time, vigorous_minutes AS \"Vigorous\"\nFROM garmin.v_daily_metrics\nWHERE nickname = ${user:singlequote} AND $__timeFilter(date)\nORDER BY time",
           "refId": "B"
         }
       ],
@@ -277,7 +277,7 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT time, distance_km AS \"Daily distance\"\nFROM garmin.v_daily_metrics\nWHERE user_id = ${user:singlequote} AND $__timeFilter(date)\nORDER BY time",
+          "rawSql": "SELECT time, distance_km AS \"Daily distance\"\nFROM garmin.v_daily_metrics\nWHERE nickname = ${user:singlequote} AND $__timeFilter(date)\nORDER BY time",
           "refId": "A"
         }
       ],
@@ -322,7 +322,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT\n  time,\n  name,\n  activity_type,\n  duration_min,\n  distance_km,\n  calories,\n  avg_hr,\n  max_hr,\n  elevation_m\nFROM garmin.v_activities\nWHERE user_id = ${user:singlequote} AND $__timeFilter(time)\nORDER BY time DESC",
+          "rawSql": "SELECT\n  time,\n  name,\n  activity_type,\n  duration_min,\n  distance_km,\n  calories,\n  avg_hr,\n  max_hr,\n  elevation_m\nFROM garmin.v_activities\nWHERE nickname = ${user:singlequote} AND $__timeFilter(time)\nORDER BY time DESC",
           "refId": "A"
         }
       ],
@@ -354,7 +354,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT\n  COALESCE(activity_type, 'unknown') AS metric,\n  COUNT(*)::bigint AS value\nFROM garmin.v_activities\nWHERE user_id = ${user:singlequote} AND $__timeFilter(time)\nGROUP BY activity_type\nORDER BY value DESC",
+          "rawSql": "SELECT\n  COALESCE(activity_type, 'unknown') AS metric,\n  COUNT(*)::bigint AS value\nFROM garmin.v_activities\nWHERE nickname = ${user:singlequote} AND $__timeFilter(time)\nGROUP BY activity_type\nORDER BY value DESC",
           "refId": "A"
         }
       ],
@@ -396,7 +396,7 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT time, vo2_max AS \"VO2 max\"\nFROM garmin.v_daily_metrics\nWHERE user_id = ${user:singlequote} AND $__timeFilter(date)\nORDER BY time",
+          "rawSql": "SELECT time, vo2_max AS \"VO2 max\"\nFROM garmin.v_daily_metrics\nWHERE nickname = ${user:singlequote} AND $__timeFilter(date)\nORDER BY time",
           "refId": "A"
         }
       ],
@@ -426,7 +426,7 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT time, weekly_training_load AS \"Weekly training load\"\nFROM garmin.v_daily_metrics\nWHERE user_id = ${user:singlequote} AND $__timeFilter(date)\nORDER BY time",
+          "rawSql": "SELECT time, weekly_training_load AS \"Weekly training load\"\nFROM garmin.v_daily_metrics\nWHERE nickname = ${user:singlequote} AND $__timeFilter(date)\nORDER BY time",
           "refId": "A"
         }
       ],
@@ -458,7 +458,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT time, training_status, load_focus\nFROM garmin.v_daily_metrics\nWHERE user_id = ${user:singlequote}\n  AND $__timeFilter(date)\n  AND training_status IS NOT NULL\nORDER BY time DESC\nLIMIT 30",
+          "rawSql": "SELECT time, training_status, load_focus\nFROM garmin.v_daily_metrics\nWHERE nickname = ${user:singlequote}\n  AND $__timeFilter(date)\n  AND training_status IS NOT NULL\nORDER BY time DESC\nLIMIT 30",
           "refId": "A"
         }
       ],
@@ -474,7 +474,7 @@
       {
         "current": { "text": "user1", "value": "user1" },
         "datasource": { "type": "grafana-postgresql-datasource", "uid": "ffmyrywbxaq68e" },
-        "definition": "SELECT user_id FROM garmin.v_users",
+        "definition": "SELECT nickname FROM garmin.v_users",
         "includeAll": false,
         "label": "User",
         "multi": false,
@@ -485,7 +485,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT user_id FROM garmin.v_users",
+          "rawSql": "SELECT nickname FROM garmin.v_users",
           "refId": "A"
         },
         "refresh": 1,

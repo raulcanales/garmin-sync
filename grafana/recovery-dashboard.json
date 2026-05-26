@@ -67,7 +67,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT time, hrv_last_night AS value\nFROM garmin.v_daily_metrics\nWHERE user_id = ${user:singlequote} AND $__timeFilter(date)\nORDER BY time DESC\nLIMIT 1",
+          "rawSql": "SELECT time, hrv_last_night AS value\nFROM garmin.v_daily_metrics\nWHERE nickname = ${user:singlequote} AND $__timeFilter(date)\nORDER BY time DESC\nLIMIT 1",
           "refId": "A"
         }
       ],
@@ -115,7 +115,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT time, sleep_score AS value\nFROM garmin.v_daily_metrics\nWHERE user_id = ${user:singlequote} AND $__timeFilter(date)\nORDER BY time DESC\nLIMIT 1",
+          "rawSql": "SELECT time, sleep_score AS value\nFROM garmin.v_daily_metrics\nWHERE nickname = ${user:singlequote} AND $__timeFilter(date)\nORDER BY time DESC\nLIMIT 1",
           "refId": "A"
         }
       ],
@@ -161,7 +161,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT time, resting_hr AS value\nFROM garmin.v_daily_metrics\nWHERE user_id = ${user:singlequote} AND $__timeFilter(date)\nORDER BY time DESC\nLIMIT 1",
+          "rawSql": "SELECT time, resting_hr AS value\nFROM garmin.v_daily_metrics\nWHERE nickname = ${user:singlequote} AND $__timeFilter(date)\nORDER BY time DESC\nLIMIT 1",
           "refId": "A"
         }
       ],
@@ -209,7 +209,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT time, stress_avg AS value\nFROM garmin.v_daily_metrics\nWHERE user_id = ${user:singlequote} AND $__timeFilter(date)\nORDER BY time DESC\nLIMIT 1",
+          "rawSql": "SELECT time, stress_avg AS value\nFROM garmin.v_daily_metrics\nWHERE nickname = ${user:singlequote} AND $__timeFilter(date)\nORDER BY time DESC\nLIMIT 1",
           "refId": "A"
         }
       ],
@@ -257,7 +257,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT time, COALESCE(morning_training_readiness, training_readiness) AS value\nFROM garmin.v_daily_metrics\nWHERE user_id = ${user:singlequote} AND $__timeFilter(date)\nORDER BY time DESC\nLIMIT 1",
+          "rawSql": "SELECT time, COALESCE(morning_training_readiness, training_readiness) AS value\nFROM garmin.v_daily_metrics\nWHERE nickname = ${user:singlequote} AND $__timeFilter(date)\nORDER BY time DESC\nLIMIT 1",
           "refId": "A"
         }
       ],
@@ -305,7 +305,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT time, body_battery_high AS value\nFROM garmin.v_daily_metrics\nWHERE user_id = ${user:singlequote} AND $__timeFilter(date)\nORDER BY time DESC\nLIMIT 1",
+          "rawSql": "SELECT time, body_battery_high AS value\nFROM garmin.v_daily_metrics\nWHERE nickname = ${user:singlequote} AND $__timeFilter(date)\nORDER BY time DESC\nLIMIT 1",
           "refId": "A"
         }
       ],
@@ -393,7 +393,7 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT time, hrv_last_night AS \"Last night\"\nFROM garmin.v_daily_metrics\nWHERE user_id = ${user:singlequote} AND $__timeFilter(date)\nORDER BY time",
+          "rawSql": "SELECT time, hrv_last_night AS \"Last night\"\nFROM garmin.v_daily_metrics\nWHERE nickname = ${user:singlequote} AND $__timeFilter(date)\nORDER BY time",
           "refId": "A"
         },
         {
@@ -401,7 +401,7 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT time, hrv_weekly_avg AS \"Weekly avg\"\nFROM garmin.v_daily_metrics\nWHERE user_id = ${user:singlequote} AND $__timeFilter(date)\nORDER BY time",
+          "rawSql": "SELECT time, hrv_weekly_avg AS \"Weekly avg\"\nFROM garmin.v_daily_metrics\nWHERE nickname = ${user:singlequote} AND $__timeFilter(date)\nORDER BY time",
           "refId": "B"
         },
         {
@@ -409,7 +409,7 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT time, hrv_baseline_low AS \"Baseline low\"\nFROM garmin.v_daily_metrics\nWHERE user_id = ${user:singlequote} AND $__timeFilter(date)\nORDER BY time",
+          "rawSql": "SELECT time, hrv_baseline_low AS \"Baseline low\"\nFROM garmin.v_daily_metrics\nWHERE nickname = ${user:singlequote} AND $__timeFilter(date)\nORDER BY time",
           "refId": "C"
         },
         {
@@ -417,7 +417,7 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT time, hrv_baseline_high AS \"Baseline high\"\nFROM garmin.v_daily_metrics\nWHERE user_id = ${user:singlequote} AND $__timeFilter(date)\nORDER BY time",
+          "rawSql": "SELECT time, hrv_baseline_high AS \"Baseline high\"\nFROM garmin.v_daily_metrics\nWHERE nickname = ${user:singlequote} AND $__timeFilter(date)\nORDER BY time",
           "refId": "D"
         }
       ],
@@ -481,7 +481,7 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT time, sleep_score AS \"Sleep score\"\nFROM garmin.v_daily_metrics\nWHERE user_id = ${user:singlequote} AND $__timeFilter(date)\nORDER BY time",
+          "rawSql": "SELECT time, sleep_score AS \"Sleep score\"\nFROM garmin.v_daily_metrics\nWHERE nickname = ${user:singlequote} AND $__timeFilter(date)\nORDER BY time",
           "refId": "A"
         }
       ],
@@ -535,7 +535,7 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT time, sleep_hours AS \"Sleep hours\"\nFROM garmin.v_daily_metrics\nWHERE user_id = ${user:singlequote} AND $__timeFilter(date)\nORDER BY time",
+          "rawSql": "SELECT time, sleep_hours AS \"Sleep hours\"\nFROM garmin.v_daily_metrics\nWHERE nickname = ${user:singlequote} AND $__timeFilter(date)\nORDER BY time",
           "refId": "A"
         }
       ],
@@ -606,7 +606,7 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT time, deep_sleep_hours AS \"Deep\"\nFROM garmin.v_daily_metrics\nWHERE user_id = ${user:singlequote} AND $__timeFilter(date)\nORDER BY time",
+          "rawSql": "SELECT time, deep_sleep_hours AS \"Deep\"\nFROM garmin.v_daily_metrics\nWHERE nickname = ${user:singlequote} AND $__timeFilter(date)\nORDER BY time",
           "refId": "A"
         },
         {
@@ -614,7 +614,7 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT time, light_sleep_hours AS \"Light\"\nFROM garmin.v_daily_metrics\nWHERE user_id = ${user:singlequote} AND $__timeFilter(date)\nORDER BY time",
+          "rawSql": "SELECT time, light_sleep_hours AS \"Light\"\nFROM garmin.v_daily_metrics\nWHERE nickname = ${user:singlequote} AND $__timeFilter(date)\nORDER BY time",
           "refId": "B"
         },
         {
@@ -622,7 +622,7 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT time, rem_sleep_hours AS \"REM\"\nFROM garmin.v_daily_metrics\nWHERE user_id = ${user:singlequote} AND $__timeFilter(date)\nORDER BY time",
+          "rawSql": "SELECT time, rem_sleep_hours AS \"REM\"\nFROM garmin.v_daily_metrics\nWHERE nickname = ${user:singlequote} AND $__timeFilter(date)\nORDER BY time",
           "refId": "C"
         },
         {
@@ -630,7 +630,7 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT time, awake_hours AS \"Awake\"\nFROM garmin.v_daily_metrics\nWHERE user_id = ${user:singlequote} AND $__timeFilter(date)\nORDER BY time",
+          "rawSql": "SELECT time, awake_hours AS \"Awake\"\nFROM garmin.v_daily_metrics\nWHERE nickname = ${user:singlequote} AND $__timeFilter(date)\nORDER BY time",
           "refId": "D"
         }
       ],
@@ -717,7 +717,7 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT time, stress_avg AS \"Stress avg\"\nFROM garmin.v_daily_metrics\nWHERE user_id = ${user:singlequote} AND $__timeFilter(date)\nORDER BY time",
+          "rawSql": "SELECT time, stress_avg AS \"Stress avg\"\nFROM garmin.v_daily_metrics\nWHERE nickname = ${user:singlequote} AND $__timeFilter(date)\nORDER BY time",
           "refId": "A"
         },
         {
@@ -725,7 +725,7 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT time, body_battery_high AS \"Body battery high\"\nFROM garmin.v_daily_metrics\nWHERE user_id = ${user:singlequote} AND $__timeFilter(date)\nORDER BY time",
+          "rawSql": "SELECT time, body_battery_high AS \"Body battery high\"\nFROM garmin.v_daily_metrics\nWHERE nickname = ${user:singlequote} AND $__timeFilter(date)\nORDER BY time",
           "refId": "B"
         },
         {
@@ -733,7 +733,7 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT time, body_battery_low AS \"Body battery low\"\nFROM garmin.v_daily_metrics\nWHERE user_id = ${user:singlequote} AND $__timeFilter(date)\nORDER BY time",
+          "rawSql": "SELECT time, body_battery_low AS \"Body battery low\"\nFROM garmin.v_daily_metrics\nWHERE nickname = ${user:singlequote} AND $__timeFilter(date)\nORDER BY time",
           "refId": "C"
         }
       ],
@@ -795,7 +795,7 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT time, resting_hr AS \"Resting HR\"\nFROM garmin.v_daily_metrics\nWHERE user_id = ${user:singlequote} AND $__timeFilter(date)\nORDER BY time",
+          "rawSql": "SELECT time, resting_hr AS \"Resting HR\"\nFROM garmin.v_daily_metrics\nWHERE nickname = ${user:singlequote} AND $__timeFilter(date)\nORDER BY time",
           "refId": "A"
         }
       ],
@@ -817,7 +817,7 @@
           "type": "grafana-postgresql-datasource",
           "uid": "ffmyrywbxaq68e"
         },
-        "definition": "SELECT user_id FROM garmin.v_users",
+        "definition": "SELECT nickname FROM garmin.v_users",
         "includeAll": false,
         "label": "User",
         "multi": false,
@@ -828,7 +828,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT user_id FROM garmin.v_users",
+          "rawSql": "SELECT nickname FROM garmin.v_users",
           "refId": "A",
           "sql": {
             "columns": [

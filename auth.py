@@ -3,7 +3,8 @@ import logging
 import shutil
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
+from typing import Literal
 
 from fastapi import HTTPException
 from fastapi.responses import HTMLResponse
@@ -14,7 +15,7 @@ import asyncpg
 import db
 import garmin_client
 from garmin_client import LoginStatus
-from users import UserConfig, validate_nickname, validate_user_id
+from users import UserConfig, validate_gender, validate_name, validate_nickname
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +24,7 @@ MFA_TTL = timedelta(minutes=10)
 
 @dataclass
 class PendingMfa:
-    user_id: str
+    user_id: int
     client: Garmin
     token_dir: str
     expires_at: datetime
@@ -33,10 +34,17 @@ _pending_mfa: dict[str, PendingMfa] = {}
 
 
 class RegisterUserBody(BaseModel):
-    user_id: str = Field(..., min_length=1, max_length=32)
-    nickname: str = Field(..., min_length=1, max_length=64)
+    nickname: str = Field(..., min_length=1, max_length=32)
+    name: str = Field(..., min_length=1, max_length=128)
+    date_of_birth: date
+    gender: Literal["male", "female"]
     email: str = Field(..., min_length=3, max_length=254)
     password: str = Field(..., min_length=1)
+    telegram_id: int | None = None
+
+
+class BindTelegramBody(BaseModel):
+    telegram_id: int = Field(..., gt=0)
 
 
 class LoginUserBody(BaseModel):
@@ -61,9 +69,12 @@ def _cleanup_expired_mfa() -> None:
 
 def _user_public(user: UserConfig) -> dict[str, object]:
     return {
-        "user_id": user.user_id,
         "nickname": user.nickname,
+        "name": user.name,
         "email": user.email,
+        "date_of_birth": user.date_of_birth.isoformat(),
+        "gender": user.gender,
+        "telegram_id": user.telegram_id,
         "logged_in": user.tokens is not None,
     }
 
@@ -76,41 +87,52 @@ async def list_users_public() -> list[dict[str, object]]:
 async def register_and_login(body: RegisterUserBody) -> dict[str, object]:
     _cleanup_expired_mfa()
     try:
-        user_id = validate_user_id(body.user_id)
         nickname = validate_nickname(body.nickname)
+        name = validate_name(body.name)
+        gender = validate_gender(body.gender)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
-    existing = await db.get_user(user_id)
+    existing = await db.get_user(nickname)
     if existing is not None:
-        raise HTTPException(status_code=409, detail=f"user_id already exists: {user_id}")
+        raise HTTPException(status_code=409, detail=f"nickname already exists: {nickname}")
 
     email = body.email.strip().lower()
     try:
-        user = await db.create_user(user_id, nickname, email)
+        user = await db.create_user(
+            nickname,
+            name,
+            email,
+            body.date_of_birth,
+            gender,
+            body.telegram_id,
+        )
     except asyncpg.UniqueViolationError as e:
-        if "users_email_idx" in str(e):
+        detail = str(e)
+        if "users_email_idx" in detail:
             raise HTTPException(status_code=409, detail="email already registered") from e
-        raise HTTPException(status_code=409, detail=f"user_id already exists: {user_id}") from e
+        if "users_telegram_id_idx" in detail:
+            raise HTTPException(status_code=409, detail="telegram_id already registered") from e
+        raise HTTPException(status_code=409, detail=f"nickname already exists: {nickname}") from e
 
     try:
         return await _login_user(user, body.password)
     except HTTPException as e:
         if e.status_code == 401:
-            refreshed = await db.get_user(user_id)
+            refreshed = await db.get_user(nickname)
             if refreshed is not None and refreshed.tokens is None:
-                await db.delete_user(user_id)
+                await db.delete_user(nickname)
         raise
 
 
-async def login_existing_user(user_id: str, body: LoginUserBody) -> dict[str, object]:
+async def login_existing_user(nickname: str, body: LoginUserBody) -> dict[str, object]:
     _cleanup_expired_mfa()
     if body.login_id:
         return await complete_mfa(body.login_id, body.mfa_code or "")
 
-    user = await db.get_user(user_id)
+    user = await db.get_user(nickname)
     if user is None:
-        raise HTTPException(status_code=404, detail=f"unknown user_id: {user_id}")
+        raise HTTPException(status_code=404, detail=f"unknown nickname: {nickname}")
     return await _login_user(user, body.password)
 
 
@@ -132,20 +154,39 @@ async def complete_mfa(login_id: str, mfa_code: str) -> dict[str, object]:
     try:
         await db.save_user_tokens(pending.user_id, result.tokens)
     except Exception as e:
-        logger.exception("failed to save tokens after MFA for %s", pending.user_id)
+        logger.exception("failed to save tokens after MFA for user_id=%s", pending.user_id)
         raise HTTPException(status_code=500, detail=f"MFA ok but token save failed: {e}") from e
-    logger.info("saved Garmin tokens after MFA for user=%s", pending.user_id)
-    user = await db.get_user(pending.user_id)
+    logger.info("saved Garmin tokens after MFA for user_id=%s", pending.user_id)
+    users = await db.list_users()
+    user = next((u for u in users if u.user_id == pending.user_id), None)
     if user is None:
         raise HTTPException(status_code=404, detail="user disappeared during login")
     return {"status": "logged_in", **_user_public(user)}
 
 
-async def delete_user(user_id: str) -> dict[str, object]:
-    deleted = await db.delete_user(user_id)
+async def bind_telegram(nickname: str, body: BindTelegramBody) -> dict[str, object]:
+    user = await db.get_user(nickname)
+    if user is None:
+        raise HTTPException(status_code=404, detail=f"unknown nickname: {nickname}")
+
+    existing = await db.get_user_by_telegram_id(body.telegram_id)
+    if existing is not None and existing.user_id != user.user_id:
+        raise HTTPException(status_code=409, detail="telegram_id already registered")
+
+    try:
+        updated = await db.update_user_telegram_id(user.user_id, body.telegram_id)
+    except asyncpg.UniqueViolationError as e:
+        raise HTTPException(status_code=409, detail="telegram_id already registered") from e
+    if updated is None:
+        raise HTTPException(status_code=404, detail=f"unknown nickname: {nickname}")
+    return {"status": "updated", **_user_public(updated)}
+
+
+async def delete_user(nickname: str) -> dict[str, object]:
+    deleted = await db.delete_user(nickname)
     if not deleted:
-        raise HTTPException(status_code=404, detail=f"unknown user_id: {user_id}")
-    return {"status": "deleted", "user_id": user_id}
+        raise HTTPException(status_code=404, detail=f"unknown nickname: {nickname}")
+    return {"status": "deleted", "nickname": nickname}
 
 
 async def _login_user(user: UserConfig, password: str) -> dict[str, object]:
@@ -163,7 +204,7 @@ async def _login_user(user: UserConfig, password: str) -> dict[str, object]:
         return {
             "status": "mfa_required",
             "login_id": login_id,
-            "user_id": user.user_id,
+            "nickname": user.nickname,
             "message": "Check your email for the Garmin MFA code, then POST the code.",
         }
     if result.status != LoginStatus.SUCCESS or not result.tokens:
@@ -172,10 +213,10 @@ async def _login_user(user: UserConfig, password: str) -> dict[str, object]:
     try:
         await db.save_user_tokens(user.user_id, result.tokens)
     except Exception as e:
-        logger.exception("failed to save tokens for %s", user.user_id)
+        logger.exception("failed to save tokens for user_id=%s", user.user_id)
         raise HTTPException(status_code=500, detail=f"login ok but token save failed: {e}") from e
-    logger.info("saved Garmin tokens for user=%s", user.user_id)
-    refreshed = await db.get_user(user.user_id)
+    logger.info("saved Garmin tokens for user_id=%s", user.user_id)
+    refreshed = await db.get_user(user.nickname)
     if refreshed is None:
         raise HTTPException(status_code=404, detail="user disappeared during login")
     return {"status": "logged_in", **_user_public(refreshed)}
@@ -194,7 +235,7 @@ LOGIN_PAGE = """<!doctype html>
     p.sub { opacity: 0.8; margin-top: 0; }
     form { display: grid; gap: 0.75rem; margin-top: 1.5rem; }
     label { display: grid; gap: 0.25rem; font-size: 0.9rem; }
-    input { padding: 0.55rem 0.65rem; font-size: 1rem; border: 1px solid #8884; border-radius: 6px; }
+    input, select { padding: 0.55rem 0.65rem; font-size: 1rem; border: 1px solid #8884; border-radius: 6px; }
     button { padding: 0.65rem 1rem; font-size: 1rem; border: 0; border-radius: 6px; cursor: pointer; }
     .primary { background: #0077cc; color: #fff; }
     .hidden { display: none; }
@@ -208,12 +249,22 @@ LOGIN_PAGE = """<!doctype html>
   <h1>Garmin Sync</h1>
   <p class="sub">Register an account or refresh Garmin tokens. Passwords are not stored.</p>
 
-        <form id="login-form">
-    <label>User id <small>(slug for sync API, e.g. <code>raal</code>)</small>
-      <input name="user_id" required pattern="[a-z0-9][a-z0-9_-]{0,30}[a-z0-9]|[a-z0-9]" autocomplete="username">
+  <form id="login-form">
+    <label>Nickname <small>(slug for sync API, e.g. <code>raal</code>)</small>
+      <input name="nickname" required pattern="[a-z0-9][a-z0-9_-]{0,30}[a-z0-9]|[a-z0-9]" autocomplete="username">
     </label>
-    <label>Nickname <small>(display name)</small>
-      <input name="nickname" required maxlength="64" autocomplete="nickname">
+    <label>Name
+      <input name="name" required maxlength="128" autocomplete="name">
+    </label>
+    <label>Date of birth
+      <input name="date_of_birth" type="date" required>
+    </label>
+    <label>Gender
+      <select name="gender" required>
+        <option value="">Select…</option>
+        <option value="male">Male</option>
+        <option value="female">Female</option>
+      </select>
     </label>
     <label>Garmin email
       <input name="email" type="email" required autocomplete="email">
@@ -233,7 +284,7 @@ LOGIN_PAGE = """<!doctype html>
     const mfaWrap = document.getElementById('mfa-wrap');
     const submitBtn = document.getElementById('submit-btn');
     let loginId = null;
-    let userId = null;
+    let nickname = null;
 
     function showMessage(text, ok) {
       msg.textContent = text;
@@ -245,10 +296,12 @@ LOGIN_PAGE = """<!doctype html>
       ev.preventDefault();
       submitBtn.disabled = true;
       const data = new FormData(form);
-      userId = String(data.get('user_id') || '').trim().toLowerCase();
+      nickname = String(data.get('nickname') || '').trim().toLowerCase();
       const payload = {
-        user_id: userId,
-        nickname: String(data.get('nickname') || '').trim(),
+        nickname: nickname,
+        name: String(data.get('name') || '').trim(),
+        date_of_birth: String(data.get('date_of_birth') || ''),
+        gender: String(data.get('gender') || ''),
         email: String(data.get('email') || '').trim(),
         password: String(data.get('password') || ''),
       };
@@ -256,7 +309,7 @@ LOGIN_PAGE = """<!doctype html>
       try {
         let res;
         if (loginId) {
-          res = await fetch('/users/' + encodeURIComponent(userId) + '/login', {
+          res = await fetch('/users/' + encodeURIComponent(nickname) + '/login', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ password: payload.password, login_id: loginId, mfa_code: mfaCode }),
@@ -268,7 +321,7 @@ LOGIN_PAGE = """<!doctype html>
             body: JSON.stringify(payload),
           });
           if (res.status === 409) {
-            res = await fetch('/users/' + encodeURIComponent(userId) + '/login', {
+            res = await fetch('/users/' + encodeURIComponent(nickname) + '/login', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ password: payload.password }),
@@ -284,7 +337,7 @@ LOGIN_PAGE = """<!doctype html>
           showMessage('Enter the MFA code from your email.', true);
           return;
         }
-        showMessage('Logged in as ' + body.nickname + ' (' + body.user_id + '). You can close this page.', true);
+        showMessage('Logged in as ' + body.name + ' (' + body.nickname + '). You can close this page.', true);
         loginId = null;
       } catch (err) {
         showMessage(String(err.message || err), false);

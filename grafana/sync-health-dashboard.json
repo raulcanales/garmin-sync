@@ -64,7 +64,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT started_at AS time,\n  CASE WHEN status IN ('success', 'partial') THEN 1 ELSE 0 END AS value\nFROM garmin.v_sync_log\nWHERE user_id = ${user:singlequote}\nORDER BY started_at DESC\nLIMIT 1",
+          "rawSql": "SELECT started_at AS time,\n  CASE WHEN status IN ('success', 'partial') THEN 1 ELSE 0 END AS value\nFROM garmin.v_sync_log\nWHERE nickname = ${user:singlequote}\nORDER BY started_at DESC\nLIMIT 1",
           "refId": "A"
         }
       ],
@@ -97,7 +97,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT started_at AS time, EXTRACT(EPOCH FROM started_at) * 1000 AS value\nFROM garmin.v_sync_log\nWHERE user_id = ${user:singlequote}\nORDER BY started_at DESC\nLIMIT 1",
+          "rawSql": "SELECT started_at AS time, EXTRACT(EPOCH FROM started_at) * 1000 AS value\nFROM garmin.v_sync_log\nWHERE nickname = ${user:singlequote}\nORDER BY started_at DESC\nLIMIT 1",
           "refId": "A"
         }
       ],
@@ -131,7 +131,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT started_at AS time, duration_seconds AS value\nFROM garmin.v_sync_log\nWHERE user_id = ${user:singlequote}\nORDER BY started_at DESC\nLIMIT 1",
+          "rawSql": "SELECT started_at AS time, duration_seconds AS value\nFROM garmin.v_sync_log\nWHERE nickname = ${user:singlequote}\nORDER BY started_at DESC\nLIMIT 1",
           "refId": "A"
         }
       ],
@@ -164,7 +164,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT started_at AS time, status, 1 AS value\nFROM garmin.v_sync_log\nWHERE user_id = ${user:singlequote}\nORDER BY started_at DESC\nLIMIT 1",
+          "rawSql": "SELECT started_at AS time, status, 1 AS value\nFROM garmin.v_sync_log\nWHERE nickname = ${user:singlequote}\nORDER BY started_at DESC\nLIMIT 1",
           "refId": "A"
         }
       ],
@@ -201,7 +201,7 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT started_at AS time, duration_seconds AS \"Duration\"\nFROM garmin.v_sync_log\nWHERE user_id = ${user:singlequote} AND $__timeFilter(started_at)\nORDER BY started_at",
+          "rawSql": "SELECT started_at AS time, duration_seconds AS \"Duration\"\nFROM garmin.v_sync_log\nWHERE nickname = ${user:singlequote} AND $__timeFilter(started_at)\nORDER BY started_at",
           "refId": "A"
         }
       ],
@@ -260,7 +260,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT\n  started_at,\n  finished_at,\n  status,\n  duration_seconds,\n  error,\n  items_fetched\nFROM garmin.v_sync_log\nWHERE user_id = ${user:singlequote} AND $__timeFilter(started_at)\nORDER BY started_at DESC\nLIMIT 50",
+          "rawSql": "SELECT\n  started_at,\n  finished_at,\n  status,\n  duration_seconds,\n  error,\n  items_fetched\nFROM garmin.v_sync_log\nWHERE nickname = ${user:singlequote} AND $__timeFilter(started_at)\nORDER BY started_at DESC\nLIMIT 50",
           "refId": "A"
         }
       ],
@@ -276,7 +276,7 @@
       {
         "current": { "text": "user1", "value": "user1" },
         "datasource": { "type": "grafana-postgresql-datasource", "uid": "ffmyrywbxaq68e" },
-        "definition": "SELECT user_id FROM garmin.v_users",
+        "definition": "SELECT nickname FROM garmin.v_users",
         "includeAll": false,
         "label": "User",
         "multi": false,
@@ -287,7 +287,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT user_id FROM garmin.v_users",
+          "rawSql": "SELECT nickname FROM garmin.v_users",
           "refId": "A"
         },
         "refresh": 1,

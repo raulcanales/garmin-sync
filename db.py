@@ -1,9 +1,11 @@
 import json
 import os
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any
 
 import asyncpg
+
+from users import Gender, UserConfig
 
 SCHEMA = "garmin"
 
@@ -41,7 +43,7 @@ async def close_pool() -> None:
         _pool = None
 
 
-async def upsert_batch(user_id: str, table: str, rows: list[dict[str, Any]]) -> int:
+async def upsert_batch(user_id: int, table: str, rows: list[dict[str, Any]]) -> int:
     if not rows:
         return 0
     key = TABLES[table]
@@ -130,7 +132,7 @@ async def upsert_batch(user_id: str, table: str, rows: list[dict[str, Any]]) -> 
     return count
 
 
-async def start_sync_log(user_id: str) -> int:
+async def start_sync_log(user_id: int) -> int:
     pool = await get_pool()
     row = await pool.fetchrow(
         f"""
@@ -173,24 +175,29 @@ def _tokens_to_str(tokens: Any) -> str | None:
     return json.dumps(tokens, separators=(",", ":"))
 
 
-def _row_to_user(row: asyncpg.Record) -> "UserConfig":
-    from users import UserConfig
-
+def _row_to_user(row: asyncpg.Record) -> UserConfig:
     return UserConfig(
-        user_id=row["user_id"],
+        user_id=int(row["user_id"]),
         nickname=row["nickname"],
+        name=row["name"],
         email=row["email"],
+        date_of_birth=row["date_of_birth"],
+        gender=row["gender"],
+        telegram_id=row["telegram_id"],
         tokens=_tokens_to_str(row["tokens"]),
     )
 
 
-async def list_users() -> list["UserConfig"]:
-    from users import UserConfig
+_USER_COLUMNS = """
+  user_id, nickname, name, email, date_of_birth, gender, telegram_id, tokens
+"""
 
+
+async def list_users() -> list[UserConfig]:
     pool = await get_pool()
     rows = await pool.fetch(
         f"""
-        SELECT user_id, nickname, email, tokens
+        SELECT {_USER_COLUMNS}
         FROM {SCHEMA}.users
         ORDER BY nickname
         """
@@ -198,11 +205,11 @@ async def list_users() -> list["UserConfig"]:
     return [_row_to_user(row) for row in rows]
 
 
-async def get_user(user_id: str) -> "UserConfig | None":
+async def get_user_by_id(user_id: int) -> UserConfig | None:
     pool = await get_pool()
     row = await pool.fetchrow(
         f"""
-        SELECT user_id, nickname, email, tokens
+        SELECT {_USER_COLUMNS}
         FROM {SCHEMA}.users
         WHERE user_id = $1
         """,
@@ -213,48 +220,88 @@ async def get_user(user_id: str) -> "UserConfig | None":
     return _row_to_user(row)
 
 
-async def create_user(user_id: str, nickname: str, email: str) -> "UserConfig":
-    pool = await get_pool()
-    now = datetime.now(timezone.utc)
-    row = await pool.fetchrow(
-        f"""
-        INSERT INTO {SCHEMA}.users (user_id, nickname, email, created_at, updated_at)
-        VALUES ($1, $2, $3, $4, $4)
-        RETURNING user_id, nickname, email, tokens
-        """,
-        user_id,
-        nickname,
-        email.strip().lower(),
-        now,
-    )
-    return _row_to_user(row)
-
-
-async def update_user_profile(
-    user_id: str, *, nickname: str | None = None, email: str | None = None
-) -> "UserConfig | None":
+async def get_user(nickname: str) -> UserConfig | None:
     pool = await get_pool()
     row = await pool.fetchrow(
         f"""
-        UPDATE {SCHEMA}.users
-        SET
-          nickname = COALESCE($2, nickname),
-          email = COALESCE($3, email),
-          updated_at = $4
-        WHERE user_id = $1
-        RETURNING user_id, nickname, email, tokens
+        SELECT {_USER_COLUMNS}
+        FROM {SCHEMA}.users
+        WHERE nickname = $1
         """,
-        user_id,
         nickname,
-        email.strip().lower() if email else None,
-        datetime.now(timezone.utc),
     )
     if row is None:
         return None
     return _row_to_user(row)
 
 
-async def save_user_tokens(user_id: str, tokens: str) -> None:
+async def get_user_by_telegram_id(telegram_id: int) -> UserConfig | None:
+    pool = await get_pool()
+    row = await pool.fetchrow(
+        f"""
+        SELECT {_USER_COLUMNS}
+        FROM {SCHEMA}.users
+        WHERE telegram_id = $1
+        """,
+        telegram_id,
+    )
+    if row is None:
+        return None
+    return _row_to_user(row)
+
+
+async def create_user(
+    nickname: str,
+    name: str,
+    email: str,
+    date_of_birth: date,
+    gender: Gender,
+    telegram_id: int | None = None,
+) -> UserConfig:
+    pool = await get_pool()
+    now = datetime.now(timezone.utc)
+    row = await pool.fetchrow(
+        f"""
+        INSERT INTO {SCHEMA}.users (
+          nickname, name, email, date_of_birth, gender, telegram_id,
+          created_at, updated_at
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $7)
+        RETURNING {_USER_COLUMNS}
+        """,
+        nickname,
+        name,
+        email.strip().lower(),
+        date_of_birth,
+        gender,
+        telegram_id,
+        now,
+    )
+    return _row_to_user(row)
+
+
+async def update_user_telegram_id(
+    user_id: int, telegram_id: int | None
+) -> UserConfig | None:
+    pool = await get_pool()
+    now = datetime.now(timezone.utc)
+    row = await pool.fetchrow(
+        f"""
+        UPDATE {SCHEMA}.users
+        SET telegram_id = $2, updated_at = $3
+        WHERE user_id = $1
+        RETURNING {_USER_COLUMNS}
+        """,
+        user_id,
+        telegram_id,
+        now,
+    )
+    if row is None:
+        return None
+    return _row_to_user(row)
+
+
+async def save_user_tokens(user_id: int, tokens: str) -> None:
     payload = json.loads(tokens)
     if not isinstance(payload, dict) or not payload.get("di_token"):
         raise ValueError("Refusing to save invalid Garmin token payload")
@@ -275,7 +322,7 @@ async def save_user_tokens(user_id: str, tokens: str) -> None:
         raise RuntimeError(f"Failed to save tokens for user_id={user_id}")
 
 
-async def clear_user_tokens(user_id: str) -> None:
+async def clear_user_tokens(user_id: int) -> None:
     pool = await get_pool()
     await pool.execute(
         f"""
@@ -288,12 +335,10 @@ async def clear_user_tokens(user_id: str) -> None:
     )
 
 
-async def delete_user(user_id: str) -> bool:
+async def delete_user(nickname: str) -> bool:
     pool = await get_pool()
     result = await pool.execute(
-        f"DELETE FROM {SCHEMA}.users WHERE user_id = $1",
-        user_id,
+        f"DELETE FROM {SCHEMA}.users WHERE nickname = $1",
+        nickname,
     )
     return result.endswith("1")
-
-

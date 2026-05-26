@@ -18,14 +18,18 @@ Garmin credentials are **not** configured via environment variables. Use `GET /l
 
 Each account has:
 
-- **user_id** — slug you choose (e.g. `raal`, `partner`); used in sync URLs and Grafana
-- **nickname** — display name
+- **user_id** — auto-increment integer primary key (internal)
+- **nickname** — slug you choose (e.g. `raal`, `partner`); used in Grafana and workout URLs
+- **name** — display name from the login page
+- **date_of_birth** — date from the login page
+- **gender** — `male` or `female`
+- **telegram_id** — optional Telegram user id
 - **email** — Garmin Connect email
 - **tokens** — DI OAuth tokens stored in `garmin.users` after login (passwords are never stored)
 
 ### Web login (recommended)
 
-Open `/login` after the app starts, fill in user id, nickname, email, and password. If Garmin sends an MFA code, enter it on the same page.
+Open `/login` after the app starts, fill in nickname, name, date of birth, gender, email, and password. If Garmin sends an MFA code, enter it on the same page.
 
 ```bash
 ./scripts/local-login.sh
@@ -39,13 +43,13 @@ Register a new user and log in:
 ```bash
 curl -X POST http://localhost:8080/users \
   -H 'Content-Type: application/json' \
-  -d '{"user_id":"raal","nickname":"Raal","email":"you@example.com","password":"your-garmin-password"}'
+  -d '{"nickname":"raal","name":"Raal","date_of_birth":"1990-01-15","gender":"male","email":"you@example.com","password":"your-garmin-password"}'
 ```
 
 If MFA is required:
 
 ```json
-{"status":"mfa_required","login_id":"…","user_id":"raal","message":"…"}
+{"status":"mfa_required","login_id":"…","nickname":"raal","message":"…"}
 ```
 
 Complete MFA:
@@ -69,6 +73,14 @@ List users:
 ```bash
 curl http://localhost:8080/users
 curl http://localhost:8080/health
+```
+
+Bind a Telegram id to an existing user (by `nickname`):
+
+```bash
+curl -X PATCH http://localhost:8080/users/raal/telegram \
+  -H 'Content-Type: application/json' \
+  -d '{"telegram_id":123456789}'
 ```
 
 ## Local testing (Mac / Linux)
@@ -108,7 +120,7 @@ To force re-login, clear tokens for a user:
 
 ```bash
 docker compose --profile local exec postgres psql -U garmin -d garmin \
-  -c "UPDATE garmin.users SET tokens = NULL WHERE user_id = 'raal';"
+  -c "UPDATE garmin.users SET tokens = NULL WHERE nickname = 'raal';"
 ```
 
 ### 4. Verify
@@ -116,7 +128,7 @@ docker compose --profile local exec postgres psql -U garmin -d garmin \
 ```bash
 curl http://localhost:8080/health
 curl -X POST http://localhost:8080/sync
-curl -X POST "http://localhost:8080/sync?user_id=raal"
+curl -X POST "http://localhost:8080/sync?telegram_id=123456789"
 curl -X POST "http://localhost:8080/sync?start_date=2026-05-01&end_date=2026-05-23"
 ```
 
@@ -129,8 +141,8 @@ docker compose --profile local logs -f garmin-sync
 Inspect the database (optional):
 
 ```bash
-docker compose --profile local exec postgres psql -U garmin -d garmin -c "SELECT user_id, nickname, email, tokens IS NOT NULL AS logged_in FROM garmin.users;"
-docker compose --profile local exec postgres psql -U garmin -d garmin -c "SELECT id, user_id, status, finished_at, items_fetched FROM garmin.sync_log ORDER BY id DESC LIMIT 10;"
+docker compose --profile local exec postgres psql -U garmin -d garmin -c "SELECT user_id, nickname, name, email, tokens IS NOT NULL AS logged_in FROM garmin.users;"
+docker compose --profile local exec postgres psql -U garmin -d garmin -c "SELECT sl.id, u.nickname, sl.status, sl.finished_at, sl.items_fetched FROM garmin.sync_log sl JOIN garmin.users u ON u.user_id = sl.user_id ORDER BY sl.id DESC LIMIT 10;"
 ```
 
 Without date parameters, sync fetches **today only**. Pass `start_date` and optionally `end_date` (YYYY-MM-DD) to backfill a range.
@@ -205,11 +217,11 @@ On Unraid, use `docker-compose-unraid.yml` (pulls the published image). Local de
 
 ## Grafana views
 
-Migration `002_grafana_views.sql` creates read-only views for Grafana Postgres datasource queries. Migration `004_users.sql` replaces `garmin.v_users` with registered accounts (includes nicknames).
+`001_initial_schema.sql` creates tables, the `garmin.users` registry, and read-only Grafana views.
 
 | View | Use |
 |------|-----|
-| `garmin.v_users` | User dropdown (`user_id`, `nickname`, `logged_in`) |
+| `garmin.v_users` | User dropdown (`nickname`, `name`, `logged_in`, …) |
 | `garmin.v_daily_metrics` | Recovery / wellness time series (HRV, sleep, stress, steps, etc.) |
 | `garmin.v_activities` | Workout history |
 | `garmin.v_body_composition` | Weight and body composition |
@@ -220,12 +232,12 @@ Example Grafana panel query:
 ```sql
 SELECT time, hrv_last_night, hrv_weekly_avg, sleep_score, resting_hr
 FROM garmin.v_daily_metrics
-WHERE user_id = ${user:singlequote}
+WHERE nickname = ${user:singlequote}
   AND $__timeFilter(date)
 ORDER BY time
 ```
 
-User variable query: `SELECT user_id, nickname FROM garmin.v_users ORDER BY nickname`.
+User variable query: `SELECT nickname, name FROM garmin.v_users ORDER BY nickname`.
 
 ### Dashboards
 
@@ -245,25 +257,25 @@ Create a read-only Postgres user for Grafana scoped to the `garmin` schema.
 ```bash
 curl -X POST http://host:8081/sync
 curl -X POST "http://host:8081/sync?start_date=2026-05-01&end_date=2026-05-23"
-curl -X POST "http://host:8081/sync?user_id=raal&start_date=2026-05-23"
+curl -X POST "http://host:8081/sync?telegram_id=123456789&start_date=2026-05-23"
 curl http://host:8081/health
 curl "http://host:8081/exercises?q=squat&limit=10"
 ```
 
-Returns `{"status":"started","start_date":"...","end_date":"...","sync_log_id":...}` for one user, or `{"status":"started","sync_log_ids":{"raal":1,"partner":2}}` when syncing all. Optional query params:
+Returns `{"status":"started","start_date":"...","end_date":"...","telegram_id":123456789,"sync_log_id":...}` for one user, or `{"status":"started","sync_log_ids":{"123456789":1,"987654321":2}}` when syncing all. Optional query params:
 
-- `user_id` — sync a single account
+- `telegram_id` — sync a single account (must be registered on the user; see `GET /users`)
 - `start_date` — first day to fetch (defaults to today)
 - `end_date` — last day to fetch (defaults to `start_date`)
 
 If a sync is already running: HTTP 409 and `{"status":"already_running"}`.
 
-## Migrating from env-based config
+## Fresh database
 
-Older versions read `GARMIN_EMAIL` / `GARMIN_USER_2_*` from the environment and stored tokens on disk under `/data/garmin_tokens/`. After upgrading:
+After a schema change that rewrites `001_initial_schema.sql`, wipe Postgres and re-register users:
 
-1. Deploy the new image and let migration `004_users.sql` run.
-2. Open `/login` and register each account (use the same `user_id` slugs as before if you want existing Grafana/history to line up).
-3. Remove Garmin credential env vars from compose — only `DATABASE_URL` is needed.
-
-Historical sync data keyed by `user_id` remains in Postgres; re-login only refreshes tokens.
+```bash
+docker compose --profile local down -v
+./scripts/local-up.sh
+./scripts/local-login.sh
+```

@@ -51,7 +51,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT time, weight_kg AS value\nFROM garmin.v_body_composition\nWHERE user_id = ${user:singlequote} AND $__timeFilter(date)\nORDER BY time DESC\nLIMIT 1",
+          "rawSql": "SELECT time, weight_kg AS value\nFROM garmin.v_body_composition\nWHERE nickname = ${user:singlequote} AND $__timeFilter(date)\nORDER BY time DESC\nLIMIT 1",
           "refId": "A"
         }
       ],
@@ -85,7 +85,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT time, body_fat_pct AS value\nFROM garmin.v_body_composition\nWHERE user_id = ${user:singlequote} AND $__timeFilter(date)\nORDER BY time DESC\nLIMIT 1",
+          "rawSql": "SELECT time, body_fat_pct AS value\nFROM garmin.v_body_composition\nWHERE nickname = ${user:singlequote} AND $__timeFilter(date)\nORDER BY time DESC\nLIMIT 1",
           "refId": "A"
         }
       ],
@@ -119,7 +119,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT time, body_water_pct AS value\nFROM garmin.v_body_composition\nWHERE user_id = ${user:singlequote} AND $__timeFilter(date)\nORDER BY time DESC\nLIMIT 1",
+          "rawSql": "SELECT time, body_water_pct AS value\nFROM garmin.v_body_composition\nWHERE nickname = ${user:singlequote} AND $__timeFilter(date)\nORDER BY time DESC\nLIMIT 1",
           "refId": "A"
         }
       ],
@@ -164,7 +164,7 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT time, weight_kg AS \"Weight\"\nFROM garmin.v_body_composition\nWHERE user_id = ${user:singlequote} AND $__timeFilter(date)\nORDER BY time",
+          "rawSql": "SELECT time, weight_kg AS \"Weight\"\nFROM garmin.v_body_composition\nWHERE nickname = ${user:singlequote} AND $__timeFilter(date)\nORDER BY time",
           "refId": "A"
         }
       ],
@@ -210,7 +210,7 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT time, body_fat_pct AS \"Body fat %\"\nFROM garmin.v_body_composition\nWHERE user_id = ${user:singlequote} AND $__timeFilter(date)\nORDER BY time",
+          "rawSql": "SELECT time, body_fat_pct AS \"Body fat %\"\nFROM garmin.v_body_composition\nWHERE nickname = ${user:singlequote} AND $__timeFilter(date)\nORDER BY time",
           "refId": "A"
         },
         {
@@ -218,7 +218,7 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT time, body_water_pct AS \"Body water %\"\nFROM garmin.v_body_composition\nWHERE user_id = ${user:singlequote} AND $__timeFilter(date)\nORDER BY time",
+          "rawSql": "SELECT time, body_water_pct AS \"Body water %\"\nFROM garmin.v_body_composition\nWHERE nickname = ${user:singlequote} AND $__timeFilter(date)\nORDER BY time",
           "refId": "B"
         }
       ],
@@ -254,7 +254,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT time, weight_kg, body_fat_pct, body_water_pct, muscle_mass_g, bone_mass_g\nFROM garmin.v_body_composition\nWHERE user_id = ${user:singlequote} AND $__timeFilter(date)\nORDER BY time DESC",
+          "rawSql": "SELECT time, weight_kg, body_fat_pct, body_water_pct, muscle_mass_g, bone_mass_g\nFROM garmin.v_body_composition\nWHERE nickname = ${user:singlequote} AND $__timeFilter(date)\nORDER BY time DESC",
           "refId": "A"
         }
       ],
@@ -270,7 +270,7 @@
       {
         "current": { "text": "user1", "value": "user1" },
         "datasource": { "type": "grafana-postgresql-datasource", "uid": "ffmyrywbxaq68e" },
-        "definition": "SELECT user_id FROM garmin.v_users",
+        "definition": "SELECT nickname FROM garmin.v_users",
         "includeAll": false,
         "label": "User",
         "multi": false,
@@ -281,7 +281,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT user_id FROM garmin.v_users",
+          "rawSql": "SELECT nickname FROM garmin.v_users",
           "refId": "A"
         },
         "refresh": 1,

@@ -11,7 +11,7 @@ import auth
 import db
 import garmin_client
 import migrations
-from auth import LoginUserBody, MfaCompleteBody, RegisterUserBody
+from auth import BindTelegramBody, LoginUserBody, MfaCompleteBody, RegisterUserBody
 from users import UserConfig
 
 logging.basicConfig(
@@ -40,8 +40,18 @@ FETCHERS: list[tuple[str, str]] = [
 ]
 
 
-async def _find_user(user_id: str) -> UserConfig | None:
-    return await db.get_user(user_id)
+async def _find_user(nickname: str) -> UserConfig | None:
+    return await db.get_user(nickname)
+
+
+async def _find_user_by_telegram_id(telegram_id: int) -> UserConfig | None:
+    return await db.get_user_by_telegram_id(telegram_id)
+
+
+def _sync_log_key(user: UserConfig) -> str:
+    if user.telegram_id is not None:
+        return str(user.telegram_id)
+    return user.nickname
 
 
 def _resolve_sync_range(
@@ -71,28 +81,28 @@ async def _sync_user(
         logger.info(
             "sync %s user=%s range %s..%s",
             log_id,
-            user.user_id,
+            user.nickname,
             start_date,
             end_date,
         )
         if not user.tokens:
-            msg = f"{user.user_id} is not logged in — open /login first"
-            logger.error("sync %s user=%s skipped: no tokens", log_id, user.user_id)
+            msg = f"{user.nickname} is not logged in — open /login first"
+            logger.error("sync %s user=%s skipped: no tokens", log_id, user.nickname)
             await db.finish_sync_log(log_id, "failed", items, msg)
             return log_id
         try:
             logger.info(
-                "sync %s user=%s connecting to Garmin", log_id, user.user_id
+                "sync %s user=%s connecting to Garmin", log_id, user.nickname
             )
             client = await asyncio.to_thread(garmin_client.garmin_login, user)
             logger.info(
                 "sync %s user=%s Garmin connected, fetching %d data types",
                 log_id,
-                user.user_id,
+                user.nickname,
                 len(FETCHERS),
             )
         except Exception as e:
-            logger.exception("garmin login failed for %s", user.user_id)
+            logger.exception("garmin login failed for %s", user.nickname)
             await db.clear_user_tokens(user.user_id)
             await db.finish_sync_log(log_id, "failed", items, str(e))
             return log_id
@@ -102,7 +112,7 @@ async def _sync_user(
                 logger.info(
                     "sync %s user=%s [%d/%d] fetching %s",
                     log_id,
-                    user.user_id,
+                    user.nickname,
                     i,
                     len(FETCHERS),
                     table,
@@ -117,7 +127,7 @@ async def _sync_user(
                 logger.info(
                     "sync %s user=%s %s: fetched %d, stored %d",
                     log_id,
-                    user.user_id,
+                    user.nickname,
                     table,
                     len(rows),
                     n,
@@ -125,7 +135,7 @@ async def _sync_user(
             except Exception as e:
                 msg = f"{table}: {e}"
                 logger.exception(
-                    "sync %s user=%s failed %s", log_id, user.user_id, table
+                    "sync %s user=%s failed %s", log_id, user.nickname, table
                 )
                 errors.append(msg)
         if ok_types == 0:
@@ -138,7 +148,7 @@ async def _sync_user(
         logger.info(
             "sync %s user=%s finished status=%s stored=%s%s",
             log_id,
-            user.user_id,
+            user.nickname,
             status,
             items,
             f" errors={err_text}" if err_text else "",
@@ -148,16 +158,16 @@ async def _sync_user(
             tokens = garmin_client.extract_tokens(client)
             await db.save_user_tokens(user.user_id, tokens)
         except Exception:
-            logger.exception("failed to persist refreshed tokens for %s", user.user_id)
+            logger.exception("failed to persist refreshed tokens for %s", user.nickname)
     except Exception as e:
-        logger.exception("sync %s user=%s aborted", log_id, user.user_id)
+        logger.exception("sync %s user=%s aborted", log_id, user.nickname)
         if owned_log or log_id is not None:
             await db.finish_sync_log(log_id, "failed", items, str(e))
     return log_id
 
 
 async def run_sync(
-    user_id: str | None = None,
+    telegram_id: int | None = None,
     start_date: date | None = None,
     end_date: date | None = None,
     log_ids: dict[str, int] | None = None,
@@ -165,41 +175,42 @@ async def run_sync(
     global _sync_running
     start, end = _resolve_sync_range(start_date, end_date)
     users = await db.list_users()
-    if user_id is not None:
-        user = await _find_user(user_id)
+    if telegram_id is not None:
+        user = await _find_user_by_telegram_id(telegram_id)
         if user is None:
-            raise ValueError(f"unknown user_id: {user_id}")
+            raise ValueError(f"unknown telegram_id: {telegram_id}")
         users = [user]
 
     if _sync_running:
         if log_ids:
-            for uid, lid in log_ids.items():
+            for _, lid in log_ids.items():
                 await db.finish_sync_log(lid, "failed", {}, "sync already running")
         return log_ids or {}
     async with sync_lock:
         if _sync_running:
             if log_ids:
-                for uid, lid in log_ids.items():
+                for _, lid in log_ids.items():
                     await db.finish_sync_log(
                         lid, "failed", {}, "sync already running"
                     )
             return log_ids or {}
         _sync_running = True
-        user_ids = [u.user_id for u in users]
+        sync_keys = [_sync_log_key(u) for u in users]
         logger.info(
             "sync job started users=%s range %s..%s",
-            user_ids,
+            sync_keys,
             start,
             end,
         )
         results: dict[str, int] = {}
         try:
             for user in users:
-                lid = (log_ids or {}).get(user.user_id)
-                results[user.user_id] = await _sync_user(user, start, end, lid)
+                key = _sync_log_key(user)
+                lid = (log_ids or {}).get(key)
+                results[key] = await _sync_user(user, start, end, lid)
         finally:
             _sync_running = False
-            logger.info("sync job finished users=%s log_ids=%s", user_ids, results)
+            logger.info("sync job finished users=%s log_ids=%s", sync_keys, results)
         return results
 
 
@@ -207,7 +218,7 @@ async def run_sync(
 async def lifespan(app: FastAPI):
     app.state.started_at = datetime.now(timezone.utc)
     await migrations.run_migrations()
-    app.state.users = [u["user_id"] for u in await auth.list_users_public()]
+    app.state.users = [u["nickname"] for u in await auth.list_users_public()]
     yield
     await db.close_pool()
 
@@ -220,7 +231,7 @@ async def health():
     started: datetime = app.state.started_at
     uptime = (datetime.now(timezone.utc) - started).total_seconds()
     users = await auth.list_users_public()
-    app.state.users = [u["user_id"] for u in users]
+    app.state.users = [u["nickname"] for u in users]
     return {
         "status": "ok",
         "uptime_seconds": round(uptime, 1),
@@ -243,9 +254,9 @@ async def register_user(body: RegisterUserBody):
     return await auth.register_and_login(body)
 
 
-@app.post("/users/{user_id}/login")
-async def login_user(user_id: str, body: LoginUserBody):
-    return await auth.login_existing_user(user_id, body)
+@app.post("/users/{nickname}/login")
+async def login_user(nickname: str, body: LoginUserBody):
+    return await auth.login_existing_user(nickname, body)
 
 
 @app.post("/users/login/mfa")
@@ -253,16 +264,22 @@ async def complete_mfa(body: MfaCompleteBody):
     return await auth.complete_mfa(body.login_id, body.mfa_code)
 
 
-@app.delete("/users/{user_id}")
-async def remove_user(user_id: str):
-    return await auth.delete_user(user_id)
+@app.patch("/users/{nickname}/telegram")
+async def bind_user_telegram(nickname: str, body: BindTelegramBody):
+    """Bind or update the Telegram user id for a registered account."""
+    return await auth.bind_telegram(nickname, body)
+
+
+@app.delete("/users/{nickname}")
+async def remove_user(nickname: str):
+    return await auth.delete_user(nickname)
 
 
 @app.post("/sync")
 async def trigger_sync(
-    user_id: str | None = Query(
+    telegram_id: int | None = Query(
         default=None,
-        description="Sync one user by slug. Omit to sync all registered users.",
+        description="Sync one user by Telegram id. Omit to sync all registered users.",
     ),
     start_date: date | None = Query(
         default=None,
@@ -282,31 +299,43 @@ async def trigger_sync(
             status_code=409,
             content={"status": "already_running"},
         )
-    if user_id is not None and await _find_user(user_id) is None:
+    if telegram_id is not None and await _find_user_by_telegram_id(telegram_id) is None:
+        configured = [
+            u["telegram_id"]
+            for u in await auth.list_users_public()
+            if u.get("telegram_id") is not None
+        ]
         return JSONResponse(
             status_code=400,
             content={
                 "status": "unknown_user",
-                "user_id": user_id,
-                "configured_users": app.state.users,
+                "telegram_id": telegram_id,
+                "configured_telegram_ids": configured,
             },
         )
-    users = await db.list_users() if user_id is None else [await _find_user(user_id)]
+    users = (
+        await db.list_users()
+        if telegram_id is None
+        else [await _find_user_by_telegram_id(telegram_id)]
+    )
     log_ids = {
-        user.user_id: await db.start_sync_log(user.user_id)
+        _sync_log_key(user): await db.start_sync_log(user.user_id)
         for user in users
         if user
     }
-    asyncio.create_task(run_sync(user_id, start_date, end_date, log_ids))
+    asyncio.create_task(run_sync(telegram_id, start_date, end_date, log_ids))
     payload: dict[str, object] = {
         "status": "started",
         "start_date": start.isoformat(),
         "end_date": end.isoformat(),
     }
     if len(log_ids) == 1:
-        uid, lid = next(iter(log_ids.items()))
-        payload["user_id"] = uid
-        payload["sync_log_id"] = lid
+        user = users[0]
+        payload["sync_log_id"] = next(iter(log_ids.values()))
+        if user.telegram_id is not None:
+            payload["telegram_id"] = user.telegram_id
+        else:
+            payload["nickname"] = user.nickname
     else:
         payload["sync_log_ids"] = log_ids
     return payload
@@ -354,9 +383,9 @@ async def list_exercises(
 
 @app.post("/workouts")
 async def create_workout(
-    user_id: str = Query(
+    nickname: str = Query(
         ...,
-        description="Registered user slug (see GET /users).",
+        description="Registered user nickname slug (see GET /users).",
     ),
     schedule_date: date | None = Query(
         default=None,
@@ -372,13 +401,13 @@ async def create_workout(
     Pass the workout body Garmin expects (see GET /exercises for valid exercise names).
     Optionally schedule it on a calendar date for the given user.
     """
-    user = await _find_user(user_id)
+    user = await _find_user(nickname)
     if user is None:
         return JSONResponse(
             status_code=400,
             content={
                 "status": "unknown_user",
-                "user_id": user_id,
+                "nickname": nickname,
                 "configured_users": app.state.users,
             },
         )
@@ -387,7 +416,7 @@ async def create_workout(
             status_code=401,
             content={
                 "status": "not_logged_in",
-                "user_id": user_id,
+                "nickname": nickname,
                 "message": "Open /login to connect this Garmin account first.",
             },
         )
@@ -405,9 +434,9 @@ async def create_workout(
         )
         tokens = garmin_client.extract_tokens(client)
         await db.save_user_tokens(user.user_id, tokens)
-        return {"status": "created", "user_id": user_id, **result}
+        return {"status": "created", "nickname": nickname, **result}
     except Exception as e:
-        logger.exception("create workout failed for %s", user_id)
+        logger.exception("create workout failed for %s", nickname)
         return JSONResponse(
             status_code=502,
             content={"status": "error", "error": str(e)},
